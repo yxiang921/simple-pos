@@ -1,6 +1,6 @@
 import { Prisma } from "@/lib/generated/prisma/client";
 import type { BaseUnit } from "@/lib/generated/prisma/enums";
-import { prisma } from "@/lib/db";
+import { prisma, table } from "@/lib/db";
 import { DomainError, isUniqueViolation } from "@/lib/errors";
 import { toBaseUnit, type InputUnit } from "@/lib/units";
 
@@ -80,7 +80,7 @@ export async function adjustStock(
   return prisma.$transaction(async (tx) => {
     const [row] = await tx.$queryRaw<{ id: string; unit: BaseUnit; current_stock: string }[]>`
       SELECT id, unit::text AS unit, current_stock::text AS current_stock
-      FROM ingredients WHERE id = ${input.ingredientId} FOR UPDATE`;
+      FROM ${table("ingredients")} WHERE id = ${input.ingredientId} FOR UPDATE`;
     if (!row) throw new DomainError("Ingredient not found.", "NOT_FOUND");
 
     const qty = toBaseUnit(input.quantity, input.inputUnit, row.unit);

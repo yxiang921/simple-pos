@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { Prisma } from "@/lib/generated/prisma/client";
 import type { BaseUnit, OrderStatus } from "@/lib/generated/prisma/enums";
-import { prisma, type TxClient } from "@/lib/db";
+import { prisma, table, type TxClient } from "@/lib/db";
 import { DomainError, InsufficientStockError, isUniqueViolation, type StockShortage } from "@/lib/errors";
 import { createOrderSchema, type CreateOrderInput } from "@/lib/validation";
 
@@ -33,7 +33,7 @@ async function lockIngredients(tx: TxClient, ids: string[]) {
   const sorted = [...ids].sort();
   const rows = await tx.$queryRaw<LockedIngredientRow[]>`
     SELECT id, name, unit::text AS unit, current_stock::text AS current_stock, is_active
-    FROM ingredients
+    FROM ${table("ingredients")}
     WHERE id IN (${Prisma.join(sorted)})
     ORDER BY id
     FOR UPDATE`;
@@ -260,7 +260,7 @@ export async function cancelOrder(orderId: string, reason: string, actor?: strin
   return prisma.$transaction(async (tx) => {
     const [order] = await tx.$queryRaw<{ id: string; order_number: number; status: OrderStatus; stock_restored_at: Date | null }[]>`
       SELECT id, order_number, status::text AS status, stock_restored_at
-      FROM orders WHERE id = ${orderId} FOR UPDATE`;
+      FROM ${table("orders")} WHERE id = ${orderId} FOR UPDATE`;
     if (!order) throw new DomainError("Order not found.", "NOT_FOUND");
     if (order.status === "CANCELLED") throw new DomainError("This order is already cancelled.", "ALREADY_CANCELLED");
     if (order.status === "COMPLETED") {

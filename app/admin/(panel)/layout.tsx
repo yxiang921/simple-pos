@@ -5,6 +5,9 @@ import { ToastProvider } from "@/components/ui/toast";
 import { SidebarNav, MobileNav } from "./sidebar-nav";
 import { logoutAction } from "../_actions/auth";
 
+// Every admin page reads live data behind a session; never prerender at build time.
+export const dynamic = "force-dynamic";
+
 export default async function PanelLayout({ children }: LayoutProps<"/admin">) {
   const admin = await requireAdmin();
   const [settings, pending] = await Promise.all([

@@ -126,7 +126,7 @@ export default async function MenuPage({ searchParams }: PageProps<"/admin/menu"
                         <span className={servings <= 5 ? "text-warning" : undefined}>{servings}</span>
                       )}
                     </TD>
-                    <TD>{m.isAvailable ? <Badge tone="green">On menu</Badge> : <Badge tone="outline">Hidden</Badge>}</TD>
+                    <TD>{m.isAvailable ? <span className="text-[12px] text-muted">On menu</span> : <Badge tone="outline">Hidden</Badge>}</TD>
                     <TD className="tabular whitespace-nowrap text-muted">{formatDateTime(m.updatedAt)}</TD>
                     <TD className="text-right">
                       <MenuRowActions id={m.id} name={m.name} isAvailable={m.isAvailable} />

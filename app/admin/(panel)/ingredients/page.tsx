@@ -133,9 +133,15 @@ export default async function IngredientsPage({ searchParams }: PageProps<"/admi
                     </TD>
                     <TD className="tabular text-right text-muted">{formatQty(i.lowStockThreshold.toString())}</TD>
                     <TD>
-                      <Badge tone={badge.tone}>{badge.label}</Badge>
+                      {i.status === "OK" ? (
+                        <span className="text-[12px] text-muted">{badge.label}</span>
+                      ) : (
+                        <Badge tone={badge.tone}>{badge.label}</Badge>
+                      )}
                     </TD>
-                    <TD className="tabular text-right text-muted">{i._count.recipes} items</TD>
+                    <TD className="tabular text-right text-muted">
+                      {i._count.recipes} {i._count.recipes === 1 ? "item" : "items"}
+                    </TD>
                     <TD className="tabular whitespace-nowrap text-muted">{formatDateTime(i.updatedAt)}</TD>
                     <TD className="text-right">
                       <IngredientRowActions ingredient={row} />

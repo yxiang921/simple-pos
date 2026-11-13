@@ -7,16 +7,19 @@ import { Loader2 } from "lucide-react";
 import { Button } from "./button";
 
 const control =
-  "w-full rounded-[4px] border border-line-strong bg-surface px-2.5 text-[14px] text-ink placeholder:text-subtle " +
+  "rounded-[4px] border border-line-strong bg-surface px-2.5 text-[14px] text-ink placeholder:text-subtle " +
   "focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 " +
   "disabled:bg-hover disabled:text-muted aria-[invalid=true]:border-danger";
 
+/** Full width unless the caller sets an explicit width class. */
+const width = (className?: string) => (/(^|\s)(w-|min-w-|max-w-)/.test(className ?? "") ? undefined : "w-full");
+
 export function Input({ className, ...props }: ComponentProps<"input">) {
-  return <input className={clsx(control, "h-9", className)} {...props} />;
+  return <input className={clsx(control, width(className), "h-9", className)} {...props} />;
 }
 
 export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
-  return <textarea className={clsx(control, "min-h-[72px] py-2", className)} {...props} />;
+  return <textarea className={clsx(control, width(className), "min-h-[72px] py-2", className)} {...props} />;
 }
 
 export function Select({ className, children, ...props }: ComponentProps<"select">) {
@@ -24,6 +27,7 @@ export function Select({ className, children, ...props }: ComponentProps<"select
     <select
       className={clsx(
         control,
+        width(className),
         "h-9 appearance-none bg-[length:16px] bg-[right_8px_center] bg-no-repeat pr-8",
         "bg-[url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23666' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")]",
         className,

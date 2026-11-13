@@ -16,8 +16,8 @@ const TYPE_TONE: Record<string, "neutral" | "green" | "warning" | "danger" | "ou
   INITIAL: "outline",
   RESTOCK: "green",
   ORDER_DEDUCTION: "neutral",
-  ORDER_CANCELLATION: "warning",
-  ADJUSTMENT: "danger",
+  ORDER_CANCELLATION: "outline",
+  ADJUSTMENT: "warning",
 };
 
 export default async function MovementsPage({ searchParams }: PageProps<"/admin/inventory/movements">) {

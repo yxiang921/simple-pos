@@ -1,15 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { prisma } from "@/lib/db";
+import { dbSchema } from "@/lib/db-schema";
 
 export const D = (v: string | number) => new Prisma.Decimal(v);
 
 export async function resetDb() {
-  await prisma.$executeRawUnsafe(`
-    TRUNCATE TABLE inventory_movements, order_ingredients, order_items, orders,
-      menu_item_ingredients, menu_items, categories, ingredients,
-      admin_sessions, admin_users, store_settings
-    RESTART IDENTITY CASCADE`);
+  const tables = [
+    "inventory_movements", "order_ingredients", "order_items", "orders",
+    "menu_item_ingredients", "menu_items", "categories", "ingredients",
+    "admin_sessions", "admin_users", "store_settings",
+  ].map((t) => `"${dbSchema()}"."${t}"`);
+  await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${tables.join(", ")} RESTART IDENTITY CASCADE`);
 }
 
 /** The Chicken Burger scenario from the specification. */

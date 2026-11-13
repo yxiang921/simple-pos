@@ -41,7 +41,8 @@ export function Dialog({
         if (e.target === ref.current) onClose();
       }}
       className={clsx(
-        "m-auto w-[calc(100%-2rem)] rounded-[6px] border border-line bg-surface p-0 text-ink shadow-[0_8px_24px_rgb(0_0_0/0.12)]",
+        // text-left/whitespace-normal: dialogs are often rendered inside right-aligned table cells.
+        "m-auto w-[calc(100%-2rem)] whitespace-normal rounded-[6px] border border-line bg-surface p-0 text-left text-[14px] font-normal text-ink shadow-[0_8px_24px_rgb(0_0_0/0.12)]",
         { sm: "max-w-sm", md: "max-w-lg", lg: "max-w-2xl" }[width],
       )}
     >

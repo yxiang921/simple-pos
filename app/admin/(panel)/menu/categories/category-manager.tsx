@@ -44,7 +44,7 @@ export function CategoryManager({ categories }: { categories: Category[] }) {
                   <TD className="tabular text-muted">{c.sortOrder}</TD>
                   <TD className="font-medium">{c.name}</TD>
                   <TD className="tabular text-right">{c.itemCount}</TD>
-                  <TD>{c.isActive ? <Badge tone="green">Visible</Badge> : <Badge tone="outline">Hidden</Badge>}</TD>
+                  <TD>{c.isActive ? <span className="text-[12px] text-muted">Visible</span> : <Badge tone="outline">Hidden</Badge>}</TD>
                   <TD className="text-right">
                     <div className="flex justify-end gap-1">
                       <Button size="icon" variant="ghost" className="size-7" aria-label={`Edit ${c.name}`} onClick={() => setEditing(c)}>
