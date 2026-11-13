@@ -1,0 +1,228 @@
+// Restaurant POS & Inventory — PostgreSQL schema
+// Money: NUMERIC(10,2). Ingredient quantities: NUMERIC(14,3) in base units (pcs, g, ml).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+// Connection URLs live in prisma.config.ts (CLI / migrations) and lib/db.ts (runtime).
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Auth ──────────────────────────────────────────────────────────────
+
+model AdminUser {
+  id           String         @id @default(cuid())
+  email        String         @unique
+  name         String         @default("Administrator")
+  passwordHash String         @map("password_hash")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+  sessions     AdminSession[]
+
+  @@map("admin_users")
+}
+
+model AdminSession {
+  id          String    @id @default(cuid())
+  tokenHash   String    @unique @map("token_hash")
+  adminUserId String    @map("admin_user_id")
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime  @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([adminUserId])
+  @@index([expiresAt])
+  @@map("admin_sessions")
+}
+
+// ─── Store settings (singleton row id = 1) ─────────────────────────────
+
+model StoreSetting {
+  id              Int      @id @default(1)
+  storeName       String   @default("Kopi & Co.") @map("store_name")
+  acceptingOrders Boolean  @default(true) @map("accepting_orders")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("store_settings")
+}
+
+// ─── Menu ──────────────────────────────────────────────────────────────
+
+model Category {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  sortOrder Int        @default(0) @map("sort_order")
+  isActive  Boolean    @default(true) @map("is_active")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  menuItems MenuItem[]
+
+  @@index([sortOrder])
+  @@map("categories")
+}
+
+model MenuItem {
+  id          String               @id @default(cuid())
+  categoryId  String               @map("category_id")
+  category    Category             @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  name        String
+  description String               @default("")
+  price       Decimal              @db.Decimal(10, 2)
+  imageUrl    String?              @map("image_url")
+  isAvailable Boolean              @default(true) @map("is_available")
+  // Soft delete: archived items disappear from menus but keep order history intact.
+  isArchived  Boolean              @default(false) @map("is_archived")
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+  recipe      MenuItemIngredient[]
+  orderItems  OrderItem[]
+
+  @@index([categoryId])
+  @@index([isArchived, isAvailable])
+  @@map("menu_items")
+}
+
+// ─── Inventory ─────────────────────────────────────────────────────────
+
+/// Base units used for all stock arithmetic. kg / L are accepted on input and converted.
+enum BaseUnit {
+  PCS
+  G
+  ML
+}
+
+model Ingredient {
+  id                String               @id @default(cuid())
+  name              String               @unique
+  sku               String?              @unique
+  unit              BaseUnit
+  currentStock      Decimal              @default(0) @map("current_stock") @db.Decimal(14, 3)
+  lowStockThreshold Decimal              @default(0) @map("low_stock_threshold") @db.Decimal(14, 3)
+  isActive          Boolean              @default(true) @map("is_active")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+  recipes           MenuItemIngredient[]
+  orderIngredients  OrderIngredient[]
+  movements         InventoryMovement[]
+
+  @@index([isActive])
+  @@map("ingredients")
+}
+
+model MenuItemIngredient {
+  id               String     @id @default(cuid())
+  menuItemId       String     @map("menu_item_id")
+  menuItem         MenuItem   @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  ingredientId     String     @map("ingredient_id")
+  ingredient       Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  quantityRequired Decimal    @map("quantity_required") @db.Decimal(12, 3)
+
+  @@unique([menuItemId, ingredientId])
+  @@index([ingredientId])
+  @@map("menu_item_ingredients")
+}
+
+// ─── Orders ────────────────────────────────────────────────────────────
+
+enum OrderStatus {
+  PENDING
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+}
+
+model Order {
+  id              String            @id @default(cuid())
+  orderNumber     Int               @unique @default(autoincrement()) @map("order_number")
+  customerName    String            @map("customer_name")
+  tableNumber     String?           @map("table_number")
+  status          OrderStatus       @default(PENDING)
+  paymentStatus   PaymentStatus     @default(UNPAID) @map("payment_status")
+  totalAmount     Decimal           @map("total_amount") @db.Decimal(10, 2)
+  idempotencyKey  String            @unique @map("idempotency_key")
+  // SHA-256 of the normalized request; a reused key with a different cart is rejected.
+  requestHash     String            @map("request_hash")
+  cancelReason    String?           @map("cancel_reason")
+  cancelledAt     DateTime?         @map("cancelled_at")
+  // Set exactly once when deducted stock is returned on cancellation.
+  stockRestoredAt DateTime?         @map("stock_restored_at")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  items           OrderItem[]
+  ingredients     OrderIngredient[]
+  movements       InventoryMovement[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id                   String   @id @default(cuid())
+  orderId              String   @map("order_id")
+  order                Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  menuItemId           String   @map("menu_item_id")
+  menuItem             MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+  menuItemNameSnapshot String   @map("menu_item_name_snapshot")
+  quantity             Int
+  unitPriceSnapshot    Decimal  @map("unit_price_snapshot") @db.Decimal(10, 2)
+  subtotal             Decimal  @db.Decimal(10, 2)
+
+  @@index([orderId])
+  @@index([menuItemId])
+  @@map("order_items")
+}
+
+/// Historical snapshot of exactly what was deducted for an order.
+model OrderIngredient {
+  id                     String     @id @default(cuid())
+  orderId                String     @map("order_id")
+  order                  Order      @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  ingredientId           String     @map("ingredient_id")
+  ingredient             Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  ingredientNameSnapshot String     @map("ingredient_name_snapshot")
+  unitSnapshot           BaseUnit   @map("unit_snapshot")
+  quantityDeducted       Decimal    @map("quantity_deducted") @db.Decimal(14, 3)
+
+  @@unique([orderId, ingredientId])
+  @@index([ingredientId])
+  @@map("order_ingredients")
+}
+
+enum MovementType {
+  INITIAL
+  RESTOCK
+  ORDER_DEDUCTION
+  ORDER_CANCELLATION
+  ADJUSTMENT
+}
+
+model InventoryMovement {
+  id             String       @id @default(cuid())
+  ingredientId   String       @map("ingredient_id")
+  ingredient     Ingredient   @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  orderId        String?      @map("order_id")
+  order          Order?       @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  movementType   MovementType @map("movement_type")
+  // Signed: negative for deductions, positive for restocks/restorations.
+  quantityChange Decimal      @map("quantity_change") @db.Decimal(14, 3)
+  balanceAfter   Decimal      @map("balance_after") @db.Decimal(14, 3)
+  reason         String
+  createdBy      String?      @map("created_by")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  @@index([ingredientId, createdAt])
+  @@index([orderId])
+  @@index([movementType])
+  @@index([createdAt])
+  @@map("inventory_movements")
+}
