@@ -13,6 +13,8 @@ import { Prisma } from "../lib/generated/prisma/client";
 import { prisma } from "../lib/db";
 import { hashPassword } from "../lib/auth/password";
 import { cancelOrder, createOrder, updateOrderStatus, setPaymentStatus } from "../lib/services/orders";
+import { costPerBaseUnit } from "../lib/units";
+import { DEMO_COSTS, DEMO_HOURS, DEMO_MENU } from "../scripts/demo-catalog";
 
 const D = (v: string | number) => new Prisma.Decimal(v);
 
@@ -242,7 +244,11 @@ const MENU: { name: string; category: string; price: string; description: string
 
 async function main() {
   // Store settings + admin account
-  await prisma.storeSetting.upsert({ where: { id: 1 }, create: { id: 1, storeName: "Kopi & Co." }, update: {} });
+  await prisma.storeSetting.upsert({
+    where: { id: 1 },
+    create: { id: 1, storeName: "Kopi & Co.", ...DEMO_HOURS, timezone: "Asia/Kuala_Lumpur" },
+    update: {},
+  });
 
   const email = (process.env.SEED_ADMIN_EMAIL ?? "admin@example.com").trim().toLowerCase();
   const password = process.env.SEED_ADMIN_PASSWORD ?? "change-me-please";
@@ -267,7 +273,17 @@ async function main() {
   const ings = new Map<string, string>();
   for (const i of INGREDIENTS) {
     const row = await prisma.ingredient.create({
-      data: { name: i.name, sku: i.sku, unit: i.unit, currentStock: D(i.stock), lowStockThreshold: D(i.low) },
+      data: {
+        name: i.name,
+        sku: i.sku,
+        unit: i.unit,
+        currentStock: D(i.stock),
+        lowStockThreshold: D(i.low),
+        // Illustrative demo cost (RM per kg / L / pcs → per base unit).
+        costPerUnit: DEMO_COSTS[i.sku]
+          ? costPerBaseUnit(DEMO_COSTS[i.sku], i.unit === "G" ? "kg" : i.unit === "ML" ? "L" : "pcs", i.unit)
+          : null,
+      },
     });
     ings.set(i.name, row.id);
     await prisma.inventoryMovement.create({
@@ -292,6 +308,8 @@ async function main() {
         description: m.description,
         price: D(m.price),
         categoryId: cats.get(m.category)!,
+        isPreparedAhead: DEMO_MENU[m.name]?.preparedAhead ?? null,
+        aliases: DEMO_MENU[m.name]?.aliases ?? [],
         recipe: {
           create: m.recipe.map(([ing, qty]) => {
             const ingredientId = ings.get(ing);

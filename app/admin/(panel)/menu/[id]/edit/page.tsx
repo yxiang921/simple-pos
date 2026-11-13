@@ -38,6 +38,8 @@ export default async function EditMenuItemPage({ params }: PageProps<"/admin/men
           categoryId: item.categoryId,
           imageUrl: item.imageUrl ?? "",
           isAvailable: item.isAvailable,
+          isPreparedAhead: item.isPreparedAhead === null ? "" : item.isPreparedAhead ? "yes" : "no",
+          aliases: item.aliases.join(", "),
           recipe: item.recipe.map((r) => ({
             ingredientId: r.ingredientId,
             quantity: r.quantityRequired.toString(),

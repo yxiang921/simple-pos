@@ -44,6 +44,10 @@ model StoreSetting {
   id              Int      @id @default(1)
   storeName       String   @default("Kopi & Co.") @map("store_name")
   acceptingOrders Boolean  @default(true) @map("accepting_orders")
+  /// "HH:MM" (24h) in `timezone`; null = not set.
+  openTime        String?  @map("open_time")
+  closeTime       String?  @map("close_time")
+  timezone        String   @default("Asia/Kuala_Lumpur")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("store_settings")
@@ -75,10 +79,16 @@ model MenuItem {
   isAvailable Boolean              @default(true) @map("is_available")
   // Soft delete: archived items disappear from menus but keep order history intact.
   isArchived  Boolean              @default(false) @map("is_archived")
+  /// true = cooked in bulk ahead (e.g. nasi lemak); false = made to order; null = not set.
+  isPreparedAhead Boolean?         @map("is_prepared_ahead")
+  /// What the owner/staff call this dish, e.g. {"ayam","nl ayam"}.
+  aliases     String[]             @default([])
   createdAt   DateTime             @default(now()) @map("created_at")
   updatedAt   DateTime             @updatedAt @map("updated_at")
   recipe      MenuItemIngredient[]
   orderItems  OrderItem[]
+  dailyPreps  DailyPrep[]
+  soldOutEvents SoldOutEvent[]
 
   @@index([categoryId])
   @@index([isArchived, isAvailable])
@@ -101,6 +111,8 @@ model Ingredient {
   unit              BaseUnit
   currentStock      Decimal              @default(0) @map("current_stock") @db.Decimal(14, 3)
   lowStockThreshold Decimal              @default(0) @map("low_stock_threshold") @db.Decimal(14, 3)
+  /// RM per ONE base unit (per g / ml / pcs). e.g. chicken RM11/kg = 0.011. null = unknown.
+  costPerUnit       Decimal?             @map("cost_per_unit") @db.Decimal(14, 6)
   isActive          Boolean              @default(true) @map("is_active")
   createdAt         DateTime             @default(now()) @map("created_at")
   updatedAt         DateTime             @updatedAt @map("updated_at")
@@ -155,6 +167,8 @@ model Order {
   cancelledAt     DateTime?         @map("cancelled_at")
   // Set exactly once when deducted stock is returned on cancellation.
   stockRestoredAt DateTime?         @map("stock_restored_at")
+  /// Generated demo history (scripts/simulate-history.ts). Never affects stock.
+  isSimulated     Boolean           @default(false) @map("is_simulated")
   createdAt       DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @updatedAt @map("updated_at")
   items           OrderItem[]
@@ -163,6 +177,7 @@ model Order {
 
   @@index([status])
   @@index([createdAt])
+  @@index([isSimulated, createdAt])
   @@map("orders")
 }
 
@@ -225,4 +240,35 @@ model InventoryMovement {
   @@index([movementType])
   @@index([createdAt])
   @@map("inventory_movements")
+}
+
+// ─── Demand planning (read by BossBuddy) ───────────────────────────────
+
+/// Plates prepared in the morning per menu item per business day (Malaysia date).
+model DailyPrep {
+  id             String   @id @default(cuid())
+  date           DateTime @db.Date
+  menuItemId     String   @map("menu_item_id")
+  menuItem       MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+  platesPrepared Int      @map("plates_prepared")
+  isSimulated    Boolean  @default(false) @map("is_simulated")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([date, menuItemId])
+  @@index([menuItemId])
+  @@map("daily_prep")
+}
+
+/// Recorded whenever a menu item is switched from available to unavailable.
+model SoldOutEvent {
+  id          String   @id @default(cuid())
+  menuItemId  String   @map("menu_item_id")
+  menuItem    MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+  soldOutAt   DateTime @default(now()) @map("sold_out_at")
+  isSimulated Boolean  @default(false) @map("is_simulated")
+
+  @@index([menuItemId, soldOutAt])
+  @@index([soldOutAt])
+  @@map("sold_out_events")
 }

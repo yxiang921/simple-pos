@@ -88,6 +88,13 @@ export function formatTime(d: Date | string): string {
   return timeFmt.format(new Date(d));
 }
 
+/** Unit used to show/enter costs: per kg, per L, or per piece. */
+export const COST_UNIT: Record<BaseUnitCode, { value: "kg" | "L" | "pcs"; factor: number }> = {
+  G: { value: "kg", factor: 1000 },
+  ML: { value: "L", factor: 1000 },
+  PCS: { value: "pcs", factor: 1 },
+};
+
 export const ORDER_STATUSES = ["PENDING", "PREPARING", "READY", "COMPLETED", "CANCELLED"] as const;
 export type OrderStatusCode = (typeof ORDER_STATUSES)[number];
 

@@ -44,9 +44,31 @@ export const changePasswordSchema = z
 
 // ─── Settings ──────────────────────────────────────────────────────────
 
+const hhmm = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v) => v || null)
+  .refine((v) => v === null || /^([01]\d|2[0-3]):[0-5]\d$/.test(v), "Use 24-hour HH:MM, e.g. 07:30");
+
+function isValidTimeZone(tz: string) {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const storeSettingsSchema = z.object({
   storeName: trimmed(80).min(1, "Store name is required"),
   acceptingOrders: checkbox,
+  openTime: hhmm,
+  closeTime: hhmm,
+  timezone: trimmed(64)
+    .optional()
+    .transform((v) => v || "Asia/Kuala_Lumpur")
+    .refine(isValidTimeZone, "Unknown time zone, e.g. Asia/Kuala_Lumpur"),
 });
 
 // ─── Categories ────────────────────────────────────────────────────────
@@ -62,6 +84,18 @@ export const categorySchema = z.object({
 export const baseUnitSchema = z.enum(["PCS", "G", "ML"]);
 export const inputUnitSchema = z.enum(["pcs", "g", "kg", "ml", "L"]);
 
+
+/** Optional cost entered per kg / L / pcs etc. Empty = unknown (stored as null). */
+const costFields = {
+  cost: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => v || null)
+    .refine((v) => v === null || /^\d{1,8}(\.\d{1,4})?$/.test(v), "Enter a cost like 11.00 (max 4 decimals)"),
+  costUnit: z.enum(["pcs", "g", "kg", "ml", "L"]).optional(),
+};
+
 export const ingredientCreateSchema = z.object({
   name: trimmed(80).min(1, "Name is required"),
   sku: trimmed(40)
@@ -70,6 +104,7 @@ export const ingredientCreateSchema = z.object({
   unit: baseUnitSchema,
   initialStock: quantityString.default("0"),
   lowStockThreshold: quantityString.default("0"),
+  ...costFields,
 });
 
 export const ingredientUpdateSchema = z.object({
@@ -80,6 +115,7 @@ export const ingredientUpdateSchema = z.object({
     .transform((v) => (v ? v.toUpperCase() : null)),
   lowStockThreshold: quantityString,
   isActive: checkbox,
+  ...costFields,
 });
 
 export const stockAdjustmentSchema = z.object({
@@ -112,12 +148,49 @@ export const menuItemSchema = z
       .transform((v) => v || null)
       .refine((v) => v === null || /^https?:\/\/\S+$/i.test(v) || v.startsWith("/"), "Enter a valid http(s) URL"),
     isAvailable: checkbox,
+    /** "yes" | "no" | "" (not set → null) */
+    isPreparedAhead: z
+      .enum(["yes", "no", ""])
+      .optional()
+      .transform((v) => (v === "yes" ? true : v === "no" ? false : null)),
+    /** Comma-separated in the form; stored as a de-duplicated lowercase text[]. */
+    aliases: z
+      .string()
+      .max(500)
+      .optional()
+      .transform((v) =>
+        [...new Set((v ?? "").split(",").map((a) => a.trim().toLowerCase()).filter(Boolean))].slice(0, 20),
+      )
+      .refine((a) => a.every((x) => x.length <= 40), "Each alias must be 40 characters or less"),
     recipe: z.array(recipeLineSchema).max(40, "Too many ingredients"),
   })
   .refine((v) => new Set(v.recipe.map((r) => r.ingredientId)).size === v.recipe.length, {
     path: ["recipe"],
     message: "Each ingredient can only appear once in the recipe",
   });
+
+// ─── Daily prep ────────────────────────────────────────────────────────
+
+export const isoDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date")
+  .refine((v) => !Number.isNaN(Date.parse(v + "T00:00:00Z")), "Invalid date");
+
+export const dailyPrepSchema = z.object({
+  date: isoDate,
+  entries: z
+    .array(
+      z.object({
+        menuItemId: idString,
+        /** null / "" = not recorded (row removed) */
+        plates: z
+          .union([z.number(), z.string(), z.null()])
+          .transform((v) => (v === null || v === "" ? null : Number(v)))
+          .refine((v) => v === null || (Number.isInteger(v) && v >= 0 && v <= 10000), "Plates must be a whole number 0–10000"),
+      }),
+    )
+    .max(500),
+});
 
 // ─── Orders ────────────────────────────────────────────────────────────
 

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { clsx } from "clsx";
 import { prisma } from "@/lib/db";
 import { stockStatus, type StockStatus } from "@/lib/services/inventory";
-import { formatDateTime, formatQty, formatQtyHint, BASE_UNIT_LABEL, type BaseUnitCode } from "@/lib/format";
+import { COST_UNIT, formatDateTime, formatQty, formatQtyHint, formatRM, BASE_UNIT_LABEL, type BaseUnitCode } from "@/lib/format";
 import { Input } from "@/components/ui/form";
 import { buttonClass } from "@/components/ui/button";
 import { Badge, EmptyState, PageHeader, Panel, Table, TD, TH, THead, TR } from "@/components/ui/misc";
@@ -94,6 +94,7 @@ export default async function IngredientsPage({ searchParams }: PageProps<"/admi
                 <TH>Unit</TH>
                 <TH className="text-right">Current stock</TH>
                 <TH className="text-right">Low at</TH>
+                <TH className="text-right">Cost</TH>
                 <TH>Status</TH>
                 <TH className="text-right">Used in</TH>
                 <TH>Last updated</TH>
@@ -113,6 +114,8 @@ export default async function IngredientsPage({ searchParams }: PageProps<"/admi
                   currentStock: i.currentStock.toString(),
                   lowStockThreshold: i.lowStockThreshold.toString(),
                   isActive: i.isActive,
+                  // Shown/edited per kg, L or pcs; stored per base unit.
+                  cost: i.costPerUnit ? i.costPerUnit.mul(COST_UNIT[unit].factor).toDecimalPlaces(4).toString() : "",
                 };
                 return (
                   <TR key={i.id} className={!i.isActive ? "text-muted" : undefined}>
@@ -132,6 +135,16 @@ export default async function IngredientsPage({ searchParams }: PageProps<"/admi
                       {hint && <span className="ml-1.5 text-[12px] text-muted">({hint})</span>}
                     </TD>
                     <TD className="tabular text-right text-muted">{formatQty(i.lowStockThreshold.toString())}</TD>
+                    <TD className="tabular whitespace-nowrap text-right">
+                      {row.cost ? (
+                        <>
+                          {formatRM(row.cost)}
+                          <span className="text-[12px] text-muted">/{COST_UNIT[unit].value}</span>
+                        </>
+                      ) : (
+                        <span className="text-subtle">—</span>
+                      )}
+                    </TD>
                     <TD>
                       {i.status === "OK" ? (
                         <span className="text-[12px] text-muted">{badge.label}</span>

@@ -1,0 +1,110 @@
+# POS → BossBuddy data contract
+
+BossBuddy reads the POS database **read-only**. All POS tables live in the schema set by `DATABASE_SCHEMA` (Kopi & Co. uses **`pos`**). Column names are snake_case; all timestamps are **UTC** (`timestamp(3)` without time zone); money and quantities are `numeric`. `null` always means *unknown / not recorded*, never zero.
+
+Migration that added the fields below: `prisma/migrations/20261114000000_demand_planning` (additive only — nothing renamed or removed).
+
+## P0
+
+### `ingredients.cost_per_unit` — `numeric(14,6)`, nullable
+RM per **one base unit**, where the base unit is `ingredients.unit`:
+
+| `unit` | cost is per | example |
+|---|---|---|
+| `G`   | gram       | chicken RM 11/kg → `0.011` |
+| `ML`  | millilitre | santan RM 12/L → `0.012` |
+| `PCS` | piece      | egg → `0.45` |
+
+Staff enter it per kg / L / pcs in **Inventory → Edit**; the POS converts. Waste cost of a plate = Σ `menu_item_ingredients.quantity_required × ingredients.cost_per_unit`.
+
+### `daily_prep`
+| column | type | notes |
+|---|---|---|
+| `id` | text (cuid/uuid) | |
+| `date` | `date` | Business date in the store time zone (`store_settings.timezone`, Malaysia) |
+| `menu_item_id` | text → `menu_items.id` | |
+| `plates_prepared` | int ≥ 0 | |
+| `is_simulated` | bool | `true` = generated demo history |
+| `created_at`, `updated_at` | timestamp (UTC) | |
+
+Unique `(date, menu_item_id)`. Entered on **Admin → Today's prep**. A blank entry deletes the row (unknown ≠ 0).
+
+Sold for a date = `sum(order_items.quantity)` of orders with `status <> 'CANCELLED'` whose `created_at` falls in that local date:
+```sql
+-- leftover per item per day (Malaysia)
+select p.date, p.menu_item_id, p.plates_prepared,
+       coalesce(sum(oi.quantity), 0) as sold,
+       p.plates_prepared - coalesce(sum(oi.quantity), 0) as leftover
+from pos.daily_prep p
+left join pos.orders o
+       on (o.created_at at time zone 'UTC' at time zone 'Asia/Kuala_Lumpur')::date = p.date
+      and o.status <> 'CANCELLED'
+left join pos.order_items oi on oi.order_id = o.id and oi.menu_item_id = p.menu_item_id
+group by p.date, p.menu_item_id, p.plates_prepared;
+```
+
+### `sold_out_events`
+| column | type | notes |
+|---|---|---|
+| `id` | text | |
+| `menu_item_id` | text → `menu_items.id` | |
+| `sold_out_at` | timestamp (UTC) | |
+| `is_simulated` | bool | |
+
+Written automatically, in the same transaction, whenever an item goes from available → unavailable (Menu → Hide, or unticking *Available* in the editor). Repeated clicks don't create duplicates; switching back on writes nothing. An item can sell out more than once a day — use the first event per day.
+
+## P1
+
+| column | type | meaning |
+|---|---|---|
+| `menu_items.is_prepared_ahead` | bool, nullable | `true` cooked in bulk (nasi lemak), `false` made to order (teh tarik), `null` not set → use your fallback |
+| `menu_items.aliases` | `text[]`, default `{}` | lowercase, de-duplicated, e.g. `{"nl ayam","ayam"}` |
+| `store_settings.open_time` / `close_time` | text `HH:MM` (24h), nullable | CHECK-constrained format; local to `timezone` |
+| `store_settings.timezone` | text, default `Asia/Kuala_Lumpur` | IANA name |
+
+`store_settings` is a single row with `id = 1`.
+
+## P2 — demo history
+
+`npm run demo:history` generates **35 days** (5 weeks, so every weekday appears ≥ 4×) before today:
+
+- `orders` (`status = COMPLETED`, `payment_status = PAID`, **`is_simulated = true`**) + `order_items` + `order_ingredients`
+- `daily_prep` for items with `is_prepared_ahead = true` (`is_simulated = true`)
+- `sold_out_events` on days simulated demand reached the plates prepared (`is_simulated = true`)
+
+Weekday pattern (Sat/Sun ≈ 1.4× Mon), breakfast/lunch/dinner peaks, ±15 % noise, slight growth. Simulated orders **do not change ingredient stock or `inventory_movements`**. Real orders/prep are never touched; real `daily_prep` rows win over simulated ones.
+
+```
+npm run demo:history -- --reset       # regenerate
+npm run demo:history -- --days=56     # 8 weeks
+npm run demo:history -- --remove      # delete all simulated data
+```
+
+To exclude demo data: `where not is_simulated`.
+
+`--demo-defaults` (on by default; `--no-demo-defaults` to skip) fills **illustrative** values from `scripts/demo-catalog.ts` — ingredient costs, `is_prepared_ahead`, aliases, opening hours — **only where the field is empty**, and only for the seeded Kopi & Co. items. Replace them with real figures when known.
+
+`menu_item_ingredients.quantity_required` is the amount **per one serving**, in the ingredient's base unit (`ingredients.unit`).
+
+## Exposing `pos` to the Supabase Data API — check first
+
+`admin_users` holds password hashes and `admin_sessions` holds session token HMACs. Every POS table has **RLS enabled with no policies**, so `anon` / `authenticated` read nothing even if the schema is exposed. Before adding `pos` under *Settings → API → Exposed schemas*, confirm in the SQL Editor:
+
+```sql
+-- 1. Must return 0 rows: no table privileges for anon/authenticated on pos
+select grantee, table_name, privilege_type
+from information_schema.role_table_grants
+where table_schema = 'pos' and grantee in ('anon', 'authenticated');
+
+-- 2. Must be false/false: no schema access
+select has_schema_privilege('anon', 'pos', 'USAGE')          as anon_usage,
+       has_schema_privilege('authenticated', 'pos', 'USAGE') as auth_usage;
+
+-- 3. Must all be true: RLS on every POS table (_prisma_migrations is Prisma's bookkeeping, not sensitive)
+select c.relname, c.relrowsecurity
+from pg_class c join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'pos' and c.relkind = 'r'
+order by 1;
+```
+
+BossBuddy should read with a server-side key/role (e.g. a dedicated read-only role granted `SELECT` on the tables it needs, **excluding `admin_users` and `admin_sessions`**), never the public anon key.

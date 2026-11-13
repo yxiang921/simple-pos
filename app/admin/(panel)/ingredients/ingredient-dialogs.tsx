@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox, Field, FormError, Input, Select } from "@/components/ui/form";
 import { useToast } from "@/components/ui/toast";
-import { BASE_UNIT_LABEL, INPUT_UNITS, formatQty, type BaseUnitCode } from "@/lib/format";
+import { BASE_UNIT_LABEL, COST_UNIT, INPUT_UNITS, formatQty, type BaseUnitCode } from "@/lib/format";
 import {
   adjustStockAction,
   createIngredientAction,
@@ -23,6 +23,8 @@ export type IngredientRow = {
   currentStock: string;
   lowStockThreshold: string;
   isActive: boolean;
+  /** RM per kg / L / pcs, "" = unknown */
+  cost: string;
 };
 
 type Errors = Record<string, string[] | undefined>;
@@ -76,7 +78,7 @@ export function IngredientRowActions({ ingredient }: { ingredient: IngredientRow
 
 function CreateDialog({ onClose }: { onClose: () => void }) {
   const toast = useToast();
-  const [v, setV] = useState({ name: "", sku: "", unit: "G" as BaseUnitCode, initialStock: "0", lowStockThreshold: "0" });
+  const [v, setV] = useState({ name: "", sku: "", unit: "G" as BaseUnitCode, initialStock: "0", lowStockThreshold: "0", cost: "" });
   const [error, setError] = useState<string | null>(null);
   const [fe, setFe] = useState<Errors>({});
   const [pending, startTransition] = useTransition();
@@ -88,7 +90,7 @@ function CreateDialog({ onClose }: { onClose: () => void }) {
         onSubmit={(e) => {
           e.preventDefault();
           startTransition(async () => {
-            const res = await createIngredientAction(v);
+            const res = await createIngredientAction({ ...v, costUnit: COST_UNIT[v.unit].value });
             if (res.ok) {
               toast(`${v.name} added`);
               onClose();
@@ -140,6 +142,21 @@ function CreateDialog({ onClose }: { onClose: () => void }) {
             />
           </Field>
         </div>
+        <Field
+          label={`Cost (RM per ${COST_UNIT[v.unit].value})`}
+          htmlFor="ing-cost"
+          error={fe.cost}
+          hint="Optional. Leave blank if unknown."
+        >
+          <Input
+            id="ing-cost"
+            inputMode="decimal"
+            className="tabular w-40"
+            value={v.cost}
+            onChange={(e) => setV({ ...v, cost: e.target.value })}
+            placeholder="e.g. 11.00"
+          />
+        </Field>
         <DialogFooter>
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" disabled={pending || !v.name.trim()}>
@@ -159,6 +176,7 @@ function EditDialog({ ingredient, onClose }: { ingredient: IngredientRow; onClos
     sku: ingredient.sku ?? "",
     lowStockThreshold: ingredient.lowStockThreshold,
     isActive: ingredient.isActive,
+    cost: ingredient.cost,
   });
   const [error, setError] = useState<string | null>(null);
   const [fe, setFe] = useState<Errors>({});
@@ -172,7 +190,7 @@ function EditDialog({ ingredient, onClose }: { ingredient: IngredientRow; onClos
         onSubmit={(e) => {
           e.preventDefault();
           startTransition(async () => {
-            const res = await updateIngredientAction({ id: ingredient.id, ...v });
+            const res = await updateIngredientAction({ id: ingredient.id, ...v, costUnit: COST_UNIT[ingredient.unit].value });
             if (res.ok) {
               toast("Ingredient updated");
               onClose();
@@ -192,15 +210,32 @@ function EditDialog({ ingredient, onClose }: { ingredient: IngredientRow; onClos
             <Input id="ed-sku" value={v.sku} onChange={(e) => setV({ ...v, sku: e.target.value })} maxLength={40} />
           </Field>
         </div>
-        <Field label={`Low-stock threshold (${unit})`} htmlFor="ed-low" error={fe.lowStockThreshold}>
-          <Input
-            id="ed-low"
-            inputMode="decimal"
-            className="tabular w-40"
-            value={v.lowStockThreshold}
-            onChange={(e) => setV({ ...v, lowStockThreshold: e.target.value })}
-          />
-        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label={`Low-stock threshold (${unit})`} htmlFor="ed-low" error={fe.lowStockThreshold}>
+            <Input
+              id="ed-low"
+              inputMode="decimal"
+              className="tabular"
+              value={v.lowStockThreshold}
+              onChange={(e) => setV({ ...v, lowStockThreshold: e.target.value })}
+            />
+          </Field>
+          <Field
+            label={`Cost (RM per ${COST_UNIT[ingredient.unit].value})`}
+            htmlFor="ed-cost"
+            error={fe.cost}
+            hint="Blank = unknown"
+          >
+            <Input
+              id="ed-cost"
+              inputMode="decimal"
+              className="tabular"
+              value={v.cost}
+              onChange={(e) => setV({ ...v, cost: e.target.value })}
+              placeholder="e.g. 11.00"
+            />
+          </Field>
+        </div>
         <Checkbox
           label="Active — inactive ingredients make their menu items unavailable"
           checked={v.isActive}

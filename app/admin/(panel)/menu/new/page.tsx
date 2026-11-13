@@ -26,6 +26,8 @@ export default async function NewMenuItemPage() {
           categoryId: categories[0]?.id ?? "",
           imageUrl: "",
           isAvailable: true,
+          isPreparedAhead: "",
+          aliases: "",
           recipe: [],
         }}
       />

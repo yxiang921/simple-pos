@@ -6,7 +6,19 @@ import { useToast } from "@/components/ui/toast";
 import { saveSettingsAction } from "../../_actions/settings";
 import { changePasswordAction } from "../../_actions/auth";
 
-export function StoreForm({ storeName, acceptingOrders }: { storeName: string; acceptingOrders: boolean }) {
+export function StoreForm({
+  storeName,
+  acceptingOrders,
+  openTime,
+  closeTime,
+  timezone,
+}: {
+  storeName: string;
+  acceptingOrders: boolean;
+  openTime: string;
+  closeTime: string;
+  timezone: string;
+}) {
   const toast = useToast();
   const [state, action] = useActionState(saveSettingsAction, null);
   useEffect(() => {
@@ -20,6 +32,17 @@ export function StoreForm({ storeName, acceptingOrders }: { storeName: string; a
       <Field label="Store name" htmlFor="storeName" error={fe?.storeName} hint="Shown on the guest menu and receipts.">
         <Input id="storeName" name="storeName" defaultValue={storeName} maxLength={80} />
       </Field>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Opens" htmlFor="openTime" error={fe?.openTime}>
+          <Input id="openTime" name="openTime" type="time" defaultValue={openTime} />
+        </Field>
+        <Field label="Closes" htmlFor="closeTime" error={fe?.closeTime}>
+          <Input id="closeTime" name="closeTime" type="time" defaultValue={closeTime} />
+        </Field>
+        <Field label="Time zone" htmlFor="timezone" error={fe?.timezone}>
+          <Input id="timezone" name="timezone" defaultValue={timezone} maxLength={64} />
+        </Field>
+      </div>
       <div>
         <Checkbox name="acceptingOrders" defaultChecked={acceptingOrders} label="Accept new guest orders" />
         <p className="ml-6 mt-0.5 text-[12px] text-muted">Untick to pause ordering, e.g. at closing time.</p>

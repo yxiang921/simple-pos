@@ -105,7 +105,11 @@ export default async function MenuPage({ searchParams }: PageProps<"/admin/menu"
                         )}
                         <div className="min-w-0">
                           <p className="truncate font-medium">{m.name}</p>
-                          {m.description && <p className="max-w-[320px] truncate text-[12px] text-muted">{m.description}</p>}
+                          <p className="max-w-[320px] truncate text-[12px] text-muted">
+                            {m.isPreparedAhead === true ? "Prepared ahead" : m.isPreparedAhead === false ? "Made to order" : null}
+                            {m.isPreparedAhead !== null && m.description ? " · " : null}
+                            {m.description}
+                          </p>
                         </div>
                       </div>
                     </TD>

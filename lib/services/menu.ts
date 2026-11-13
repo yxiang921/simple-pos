@@ -12,6 +12,8 @@ export type MenuItemInput = {
   categoryId: string;
   imageUrl: string | null;
   isAvailable: boolean;
+  isPreparedAhead: boolean | null;
+  aliases: string[];
   recipe: { ingredientId: string; quantity: string; inputUnit: InputUnit }[];
 };
 
@@ -41,6 +43,8 @@ export async function saveMenuItem(id: string | null, input: MenuItemInput) {
       categoryId: input.categoryId,
       imageUrl: input.imageUrl,
       isAvailable: input.isAvailable,
+      isPreparedAhead: input.isPreparedAhead,
+      aliases: input.aliases,
     };
 
     let itemId: string;
@@ -48,6 +52,10 @@ export async function saveMenuItem(id: string | null, input: MenuItemInput) {
       const existing = await tx.menuItem.findUnique({ where: { id } });
       if (!existing || existing.isArchived) throw new DomainError("Menu item not found.", "NOT_FOUND");
       await tx.menuItem.update({ where: { id }, data });
+      // Switching an item off records when it sold out (demand-planning signal).
+      if (existing.isAvailable && !input.isAvailable) {
+        await tx.soldOutEvent.create({ data: { menuItemId: id } });
+      }
       await tx.menuItemIngredient.deleteMany({ where: { menuItemId: id } });
       itemId = id;
     } else {
@@ -62,10 +70,14 @@ export async function saveMenuItem(id: string | null, input: MenuItemInput) {
   });
 }
 
-/** Hard-delete never-ordered items; archive (soft delete) items with order history. */
+/** Hard-delete items with no history; archive (soft delete) items with orders, prep or sold-out records. */
 export async function deleteMenuItem(id: string): Promise<"deleted" | "archived"> {
-  const orders = await prisma.orderItem.count({ where: { menuItemId: id } });
-  if (orders === 0) {
+  const [orders, preps, soldOuts] = await Promise.all([
+    prisma.orderItem.count({ where: { menuItemId: id } }),
+    prisma.dailyPrep.count({ where: { menuItemId: id } }),
+    prisma.soldOutEvent.count({ where: { menuItemId: id } }),
+  ]);
+  if (orders + preps + soldOuts === 0) {
     await prisma.menuItem.delete({ where: { id } });
     return "deleted";
   }
@@ -73,8 +85,23 @@ export async function deleteMenuItem(id: string): Promise<"deleted" | "archived"
   return "archived";
 }
 
+/**
+ * Toggle availability. Turning an item OFF records a sold_out_events row in the
+ * same transaction. The conditional update makes repeated clicks record only once.
+ */
 export async function setMenuItemAvailability(id: string, isAvailable: boolean) {
-  await prisma.menuItem.update({ where: { id }, data: { isAvailable } });
+  await prisma.$transaction(async (tx) => {
+    const res = await tx.menuItem.updateMany({
+      where: { id, isAvailable: !isAvailable, isArchived: false },
+      data: { isAvailable },
+    });
+    if (res.count === 0) {
+      const exists = await tx.menuItem.findUnique({ where: { id }, select: { id: true } });
+      if (!exists) throw new DomainError("Menu item not found.", "NOT_FOUND");
+      return; // already in the requested state
+    }
+    if (!isAvailable) await tx.soldOutEvent.create({ data: { menuItemId: id } });
+  });
 }
 
 // ─── Categories ────────────────────────────────────────────────────────

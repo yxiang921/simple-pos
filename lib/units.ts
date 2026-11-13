@@ -25,3 +25,19 @@ export function toBaseUnit(quantity: string, inputUnit: InputUnit, baseUnit: Bas
   }
   return value;
 }
+
+/**
+ * Convert a cost entered per `inputUnit` (e.g. RM 11.00 per kg) to cost per ONE
+ * base unit (RM 0.011 per g). Returns null for an empty cost.
+ */
+export function costPerBaseUnit(cost: string | null, inputUnit: InputUnit | undefined, baseUnit: BaseUnit): Prisma.Decimal | null {
+  if (cost === null) return null;
+  const unit = inputUnit ?? ({ PCS: "pcs", G: "g", ML: "ml" } as const)[baseUnit];
+  const factor = CONVERSIONS[baseUnit][unit];
+  if (factor === undefined) {
+    throw new DomainError(`Cost unit "${unit}" doesn't match an ingredient measured in ${baseUnit.toLowerCase()}.`);
+  }
+  const value = new Prisma.Decimal(cost).div(factor);
+  if (value.decimalPlaces() > 6) throw new DomainError("Cost is too precise to store (max 6 decimal places per base unit).");
+  return value;
+}

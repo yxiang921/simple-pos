@@ -59,6 +59,8 @@ No secret is exposed to the browser — there are no `NEXT_PUBLIC_*` variables.
 | `npm run db:seed` | Seed admin + demo data (catalog is skipped if ingredients already exist) |
 | `npm run db:reset` | **Drops all data**, re-applies migrations and seeds |
 | `npm test` | Integration tests (needs `TEST_DATABASE_URL`) |
+| `npm run admin:password` | Create the admin, or reset its password, from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` |
+| `npm run demo:history` | Generate 5 weeks of **simulated** order / prep / sold-out history (flagged `is_simulated`, stock untouched). `-- --reset`, `-- --remove`, `-- --days=56` |
 
 ---
 
@@ -127,6 +129,16 @@ Each ingredient has a base unit — **pcs**, **g** or **ml** — and all stock m
 - Ingredients used in recipes or orders cannot be deleted — deactivate them instead (items using an inactive ingredient show as sold out).
 - Categories can only be deleted when empty; otherwise hide them.
 - Foreign keys use `RESTRICT` on all historical data.
+
+---
+
+## Demand planning (BossBuddy)
+
+- **Today's prep** (`/admin/prep`): staff record plates prepared each morning per dish; shows sold, left over and sold-out time.
+- **Sold-out events**: switching a dish off in Menu records the time automatically.
+- **Ingredient cost** (RM per kg / L / pcs) in Inventory; **prepared ahead / made to order** and **aliases** in the menu editor; **opening hours & time zone** in Settings.
+
+Data contract for consumers: [`docs/bossbuddy-integration.md`](docs/bossbuddy-integration.md).
 
 ---
 

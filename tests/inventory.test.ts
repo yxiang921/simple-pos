@@ -62,6 +62,8 @@ describe("menu recipes", () => {
       categoryId: s.category.id,
       imageUrl: null,
       isAvailable: true,
+      isPreparedAhead: null,
+      aliases: [],
       recipe: [{ ingredientId: s.lettuce.id, quantity: "0.15", inputUnit: "kg" }],
     });
     let recipe = await prisma.menuItemIngredient.findMany({ where: { menuItemId: id } });
@@ -74,6 +76,8 @@ describe("menu recipes", () => {
       categoryId: s.category.id,
       imageUrl: null,
       isAvailable: true,
+      isPreparedAhead: null,
+      aliases: [],
       recipe: [
         { ingredientId: s.lettuce.id, quantity: "100", inputUnit: "g" },
         { ingredientId: s.mayo.id, quantity: "15", inputUnit: "g" },

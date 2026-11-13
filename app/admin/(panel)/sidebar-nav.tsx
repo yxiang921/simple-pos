@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
-import { ArrowLeftRight, LayoutGrid, Package, ReceiptText, Settings, UtensilsCrossed } from "lucide-react";
+import { ArrowLeftRight, ClipboardList, LayoutGrid, Package, ReceiptText, Settings, UtensilsCrossed } from "lucide-react";
 
 const NAV = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutGrid },
   { href: "/admin/orders", label: "Orders", icon: ReceiptText, badge: true },
+  { href: "/admin/prep", label: "Today's prep", icon: ClipboardList },
   { href: "/admin/menu", label: "Menu", icon: UtensilsCrossed },
   { href: "/admin/ingredients", label: "Inventory", icon: Package },
   { href: "/admin/inventory/movements", label: "Stock movements", icon: ArrowLeftRight },

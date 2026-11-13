@@ -16,7 +16,13 @@ export default async function SettingsPage() {
       <div className="grid max-w-4xl gap-5 lg:grid-cols-2">
         <Panel>
           <PanelHeader title="Store" />
-          <StoreForm storeName={settings?.storeName ?? "Kopi & Co."} acceptingOrders={settings?.acceptingOrders ?? true} />
+          <StoreForm
+            storeName={settings?.storeName ?? "Kopi & Co."}
+            acceptingOrders={settings?.acceptingOrders ?? true}
+            openTime={settings?.openTime ?? ""}
+            closeTime={settings?.closeTime ?? ""}
+            timezone={settings?.timezone ?? "Asia/Kuala_Lumpur"}
+          />
         </Panel>
         <Panel>
           <PanelHeader title="Account" />

@@ -19,6 +19,10 @@ export type MenuItemFormValues = {
   categoryId: string;
   imageUrl: string;
   isAvailable: boolean;
+  /** "yes" | "no" | "" (not set) */
+  isPreparedAhead: "yes" | "no" | "";
+  /** comma-separated */
+  aliases: string;
   recipe: { ingredientId: string; quantity: string; inputUnit: string }[];
 };
 
@@ -137,6 +141,27 @@ export function MenuItemForm({
               )}
             </div>
           </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field
+              label="Preparation"
+              htmlFor="isPreparedAhead"
+              error={fieldErrors.isPreparedAhead}
+              hint="Cooked in bulk each morning, or made when ordered?"
+            >
+              <Select
+                id="isPreparedAhead"
+                value={values.isPreparedAhead}
+                onChange={(e) => set("isPreparedAhead", e.target.value as MenuItemFormValues["isPreparedAhead"])}
+              >
+                <option value="">Not set</option>
+                <option value="yes">Prepared ahead</option>
+                <option value="no">Made to order</option>
+              </Select>
+            </Field>
+            <Field label="Also called" htmlFor="aliases" error={fieldErrors.aliases} hint="Comma-separated, e.g. ayam, nl ayam">
+              <Input id="aliases" value={values.aliases} onChange={(e) => set("aliases", e.target.value)} maxLength={500} />
+            </Field>
+          </div>
           <Checkbox
             label="Available on the guest menu"
             checked={values.isAvailable}

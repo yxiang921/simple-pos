@@ -2,7 +2,7 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import type { BaseUnit } from "@/lib/generated/prisma/enums";
 import { prisma, table } from "@/lib/db";
 import { DomainError, isUniqueViolation } from "@/lib/errors";
-import { toBaseUnit, type InputUnit } from "@/lib/units";
+import { costPerBaseUnit, toBaseUnit, type InputUnit } from "@/lib/units";
 
 const D = Prisma.Decimal;
 
@@ -12,11 +12,14 @@ function uniqueMessage(err: unknown): never {
   throw err;
 }
 
+type CostInput = { cost?: string | null; costUnit?: InputUnit };
+
 export async function createIngredient(
-  input: { name: string; sku: string | null; unit: BaseUnit; initialStock: string; lowStockThreshold: string },
+  input: { name: string; sku: string | null; unit: BaseUnit; initialStock: string; lowStockThreshold: string } & CostInput,
   actor?: string,
 ) {
   const initial = new D(input.initialStock);
+  const costPerUnit = costPerBaseUnit(input.cost ?? null, input.costUnit, input.unit);
   try {
     return await prisma.$transaction(async (tx) => {
       const ingredient = await tx.ingredient.create({
@@ -26,6 +29,7 @@ export async function createIngredient(
           unit: input.unit,
           currentStock: initial,
           lowStockThreshold: new D(input.lowStockThreshold),
+          costPerUnit,
         },
       });
       if (initial.gt(0)) {
@@ -47,13 +51,18 @@ export async function createIngredient(
   }
 }
 
-export async function updateIngredient(input: {
-  id: string;
-  name: string;
-  sku: string | null;
-  lowStockThreshold: string;
-  isActive: boolean;
-}) {
+export async function updateIngredient(
+  input: {
+    id: string;
+    name: string;
+    sku: string | null;
+    lowStockThreshold: string;
+    isActive: boolean;
+  } & CostInput,
+) {
+  const existing = await prisma.ingredient.findUnique({ where: { id: input.id }, select: { unit: true } });
+  if (!existing) throw new DomainError("Ingredient not found.", "NOT_FOUND");
+  const costPerUnit = costPerBaseUnit(input.cost ?? null, input.costUnit, existing.unit);
   try {
     return await prisma.ingredient.update({
       where: { id: input.id },
@@ -62,6 +71,7 @@ export async function updateIngredient(input: {
         sku: input.sku,
         lowStockThreshold: new D(input.lowStockThreshold),
         isActive: input.isActive,
+        costPerUnit,
       },
     });
   } catch (err) {
