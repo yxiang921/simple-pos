@@ -192,6 +192,38 @@ export const dailyPrepSchema = z.object({
     .max(500),
 });
 
+// ─── Operating expenses ────────────────────────────────────────────────
+
+export const EXPENSE_CATEGORIES = ["RENT", "UTILITIES", "STAFF", "EQUIPMENT", "MAINTENANCE", "MARKETING", "LICENSES", "OTHER"] as const;
+export const EXPENSE_FREQUENCIES = ["ONE_TIME", "DAILY", "WEEKLY", "MONTHLY", "YEARLY"] as const;
+
+export const expenseSchema = z
+  .object({
+    name: trimmed(80).min(1, "Name is required"),
+    category: z.enum(EXPENSE_CATEGORIES),
+    amount: moneyString.refine((v) => Number(v) > 0, "Amount must be more than 0"),
+    frequency: z.enum(EXPENSE_FREQUENCIES),
+    startDate: isoDate,
+    endDate: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v) => v || null)
+      .refine((v) => v === null || isoDate.safeParse(v).success, "Invalid date"),
+    notes: trimmed(300).optional().default(""),
+  })
+  .refine((v) => v.endDate === null || v.endDate >= v.startDate, {
+    path: ["endDate"],
+    message: "End date must be on or after the start date",
+  })
+  .transform((v) => (v.frequency === "ONE_TIME" ? { ...v, endDate: null } : v));
+
+export const expenseChangeSchema = z.object({
+  id: idString,
+  amount: moneyString.refine((v) => Number(v) > 0, "Amount must be more than 0"),
+  effectiveFrom: isoDate,
+});
+
 // ─── Orders ────────────────────────────────────────────────────────────
 
 export const orderItemInputSchema = z.object({

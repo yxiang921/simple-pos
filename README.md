@@ -136,6 +136,7 @@ Each ingredient has a base unit — **pcs**, **g** or **ml** — and all stock m
 
 - **Today's prep** (`/admin/prep`): staff record plates prepared each morning per dish; shows sold, left over and sold-out time.
 - **Sold-out events**: switching a dish off in Menu records the time automatically.
+- **Costs** (`/admin/costs`): running costs — rent, utilities, salaries, licences — as one-time, daily, weekly, monthly or yearly amounts with start/end dates, plus a monthly estimate of sales − ingredient cost − overheads and the break-even sales per day.
 - **Ingredient cost** (RM per kg / L / pcs) in Inventory; **prepared ahead / made to order** and **aliases** in the menu editor; **opening hours & time zone** in Settings.
 
 Data contract for consumers: [`docs/bossbuddy-integration.md`](docs/bossbuddy-integration.md).

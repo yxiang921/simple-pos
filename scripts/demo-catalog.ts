@@ -65,3 +65,28 @@ export const DEMO_MENU: Record<string, { preparedAhead: boolean; aliases: string
 };
 
 export const DEMO_HOURS = { openTime: "07:00", closeTime: "21:00" };
+
+/**
+ * ILLUSTRATIVE running costs for a small Klang Valley café (RM). Inserted only
+ * when the expenses table is empty, flagged is_simulated = true.
+ */
+export const DEMO_EXPENSES: {
+  name: string;
+  category: "RENT" | "UTILITIES" | "STAFF" | "EQUIPMENT" | "MAINTENANCE" | "MARKETING" | "LICENSES" | "OTHER";
+  amount: string;
+  frequency: "ONE_TIME" | "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
+}[] = [
+  { name: "Shop rent", category: "RENT", amount: "4500.00", frequency: "MONTHLY" },
+  { name: "Electricity (TNB)", category: "UTILITIES", amount: "1350.00", frequency: "MONTHLY" },
+  { name: "Water", category: "UTILITIES", amount: "160.00", frequency: "MONTHLY" },
+  { name: "Gas cylinders", category: "UTILITIES", amount: "380.00", frequency: "MONTHLY" },
+  { name: "Internet", category: "UTILITIES", amount: "129.00", frequency: "MONTHLY" },
+  { name: "Salary – Cook", category: "STAFF", amount: "2400.00", frequency: "MONTHLY" },
+  { name: "Salary – Kitchen helper", category: "STAFF", amount: "1800.00", frequency: "MONTHLY" },
+  { name: "Salary – Cashier", category: "STAFF", amount: "1700.00", frequency: "MONTHLY" },
+  { name: "EPF / SOCSO / EIS (employer)", category: "STAFF", amount: "780.00", frequency: "MONTHLY" },
+  { name: "POS & software", category: "EQUIPMENT", amount: "99.00", frequency: "MONTHLY" },
+  { name: "Pest control", category: "MAINTENANCE", amount: "150.00", frequency: "MONTHLY" },
+  { name: "Business licence", category: "LICENSES", amount: "600.00", frequency: "YEARLY" },
+  { name: "Shop insurance", category: "LICENSES", amount: "1200.00", frequency: "YEARLY" },
+];

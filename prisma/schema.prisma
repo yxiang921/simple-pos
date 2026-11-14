@@ -272,3 +272,46 @@ model SoldOutEvent {
   @@index([soldOutAt])
   @@map("sold_out_events")
 }
+
+// ─── Operating expenses (overheads) ────────────────────────────────────
+
+enum ExpenseCategory {
+  RENT
+  UTILITIES
+  STAFF
+  EQUIPMENT
+  MAINTENANCE
+  MARKETING
+  LICENSES
+  OTHER
+}
+
+enum ExpenseFrequency {
+  ONE_TIME
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+/// Rent, utilities, salaries and other running costs. Recurring entries apply
+/// every day from start_date to end_date (inclusive; null = ongoing).
+/// ONE_TIME entries are charged in full on start_date.
+model Expense {
+  id        String           @id @default(cuid())
+  name      String
+  category  ExpenseCategory
+  /// RM per occurrence of `frequency` (e.g. per month for MONTHLY).
+  amount    Decimal          @db.Decimal(12, 2)
+  frequency ExpenseFrequency
+  startDate DateTime         @map("start_date") @db.Date
+  endDate   DateTime?        @map("end_date") @db.Date
+  notes     String           @default("")
+  isSimulated Boolean        @default(false) @map("is_simulated")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  @@index([category])
+  @@index([startDate, endDate])
+  @@map("expenses")
+}

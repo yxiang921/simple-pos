@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
-import { ArrowLeftRight, ClipboardList, LayoutGrid, Package, ReceiptText, Settings, UtensilsCrossed } from "lucide-react";
+import { ArrowLeftRight, ClipboardList, LayoutGrid, Package, ReceiptText, Settings, UtensilsCrossed, Wallet } from "lucide-react";
 
 const NAV = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutGrid },
@@ -12,6 +12,7 @@ const NAV = [
   { href: "/admin/menu", label: "Menu", icon: UtensilsCrossed },
   { href: "/admin/ingredients", label: "Inventory", icon: Package },
   { href: "/admin/inventory/movements", label: "Stock movements", icon: ArrowLeftRight },
+  { href: "/admin/costs", label: "Costs", icon: Wallet },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 

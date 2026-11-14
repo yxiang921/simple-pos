@@ -26,7 +26,7 @@ import { prisma } from "../lib/db";
 import { dbSchema } from "../lib/db-schema";
 import { costPerBaseUnit } from "../lib/units";
 import { addDays, dateColumn, DEFAULT_TZ, localDate, zonedTimeToUtc } from "../lib/time";
-import { DEMO_COSTS, DEMO_HOURS, DEMO_MENU } from "./demo-catalog";
+import { DEMO_COSTS, DEMO_EXPENSES, DEMO_HOURS, DEMO_MENU } from "./demo-catalog";
 
 const D = Prisma.Decimal;
 type Decimal = Prisma.Decimal;
@@ -114,7 +114,11 @@ async function removeSimulated() {
   }
   const prep = await prisma.dailyPrep.deleteMany({ where: { isSimulated: true } });
   const so = await prisma.soldOutEvent.deleteMany({ where: { isSimulated: true } });
-  console.log(`• Removed simulated data: ${ids.length} orders, ${prep.count} prep rows, ${so.count} sold-out events`);
+  const ex = REMOVE_ONLY ? await prisma.expense.deleteMany({ where: { isSimulated: true } }) : { count: 0 };
+  console.log(
+    `• Removed simulated data: ${ids.length} orders, ${prep.count} prep rows, ${so.count} sold-out events` +
+      (REMOVE_ONLY ? `, ${ex.count} demo running costs` : ""),
+  );
 }
 
 async function applyDemoDefaults() {
@@ -148,6 +152,21 @@ async function applyDemoDefaults() {
   if (flags) changes.push(`${flags} is_prepared_ahead flags`);
   if (aliases) changes.push(`${aliases} alias lists`);
 
+  if ((await prisma.expense.count()) === 0) {
+    const tz = (await prisma.storeSetting.findUnique({ where: { id: 1 } }))?.timezone || DEFAULT_TZ;
+    // Start early enough to cover the whole simulated period.
+    const start = `${addDays(localDate(new Date(), tz), -DAYS - 31).slice(0, 7)}-01`;
+    await prisma.expense.createMany({
+      data: DEMO_EXPENSES.map((e) => ({
+        ...e,
+        startDate: dateColumn(start),
+        notes: "Demo value — replace with your real figure",
+        isSimulated: true,
+      })),
+    });
+    changes.push(`${DEMO_EXPENSES.length} running costs`);
+  }
+
   const s = await prisma.storeSetting.findUnique({ where: { id: 1 } });
   if (!s) {
     await prisma.storeSetting.create({ data: { id: 1, ...DEMO_HOURS } });
@@ -170,13 +189,14 @@ async function main() {
   console.log(`Schema: ${dbSchema()}`);
   if (REMOVE_ONLY) return removeSimulated();
 
+  // Demo defaults only fill empty fields, so they are safe to apply on every run.
+  if (DEMO_DEFAULTS) await applyDemoDefaults();
   const existing = await prisma.order.count({ where: { isSimulated: true } });
   if (existing && !RESET) {
     console.log(`• ${existing} simulated orders already exist. Run with --reset to regenerate, or --remove to delete.`);
     return;
   }
   if (existing) await removeSimulated();
-  if (DEMO_DEFAULTS) await applyDemoDefaults();
 
   const settings = await prisma.storeSetting.findUnique({ where: { id: 1 } });
   const tz = settings?.timezone || DEFAULT_TZ;

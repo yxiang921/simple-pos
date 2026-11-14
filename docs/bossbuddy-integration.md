@@ -64,6 +64,27 @@ Written automatically, in the same transaction, whenever an item goes from avail
 
 `store_settings` is a single row with `id = 1`.
 
+## Running costs — `expenses`
+
+Rent, utilities, salaries etc., entered on **Admin → Costs** (migration `20261114010000_expenses`).
+
+| column | type | notes |
+|---|---|---|
+| `id` | text | |
+| `name` | text | e.g. "Salary – Cook" |
+| `category` | enum | `RENT`, `UTILITIES`, `STAFF`, `EQUIPMENT`, `MAINTENANCE`, `MARKETING`, `LICENSES`, `OTHER` |
+| `amount` | `numeric(12,2)` > 0 | RM **per occurrence of `frequency`** |
+| `frequency` | enum | `ONE_TIME`, `DAILY`, `WEEKLY`, `MONTHLY`, `YEARLY` |
+| `start_date` | `date` | first day it applies (the charge date for `ONE_TIME`) |
+| `end_date` | `date`, nullable | last day it applies, inclusive; `null` = ongoing (always `null` for `ONE_TIME`) |
+| `notes` | text | |
+| `is_simulated` | bool | `true` = illustrative demo cost from `demo:history` |
+| `created_at`, `updated_at` | timestamp (UTC) | |
+
+Cost on a local date `d` (start ≤ d ≤ end): `DAILY` → amount; `WEEKLY` → amount / 7; `MONTHLY` → amount / days in d's month; `YEARLY` → amount / days in d's year; `ONE_TIME` → amount only on `start_date`. A full month of a monthly cost therefore sums to exactly `amount`.
+
+Amount changes are stored as history: changing rent from 1 Dec ends the old row on 30 Nov and inserts a new row from 1 Dec, so past months stay correct. Reference implementation: `lib/services/expenses.ts` (`costOnDay`, `overheadsForRange`, `monthSummary`).
+
 ## P2 — demo history
 
 `npm run demo:history` generates **35 days** (5 weeks, so every weekday appears ≥ 4×) before today:
@@ -82,7 +103,7 @@ npm run demo:history -- --remove      # delete all simulated data
 
 To exclude demo data: `where not is_simulated`.
 
-`--demo-defaults` (on by default; `--no-demo-defaults` to skip) fills **illustrative** values from `scripts/demo-catalog.ts` — ingredient costs, `is_prepared_ahead`, aliases, opening hours — **only where the field is empty**, and only for the seeded Kopi & Co. items. Replace them with real figures when known.
+`--demo-defaults` (on by default; `--no-demo-defaults` to skip) fills **illustrative** values from `scripts/demo-catalog.ts` — ingredient costs, `is_prepared_ahead`, aliases, opening hours, and 13 running costs (only if `expenses` is empty, flagged `is_simulated`) — **only where the field is empty**, and only for the seeded Kopi & Co. items. Replace them with real figures when known.
 
 `menu_item_ingredients.quantity_required` is the amount **per one serving**, in the ingredient's base unit (`ingredients.unit`).
 
