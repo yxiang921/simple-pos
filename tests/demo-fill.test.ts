@@ -11,7 +11,7 @@ import {
   removeSimulated,
   simulateDays,
 } from "../scripts/lib/demo";
-import { resetDb, seedBurgerScenario, stockOf } from "./helpers";
+import { addBranch, resetDb, seedBurgerScenario, stockOf, T } from "./helpers";
 
 beforeEach(resetDb);
 afterAll(() => prisma.$disconnect());
@@ -43,7 +43,7 @@ describe("fillEmptyFields", () => {
     const s = await seedBurgerScenario();
     await prisma.ingredient.update({ where: { id: s.patty.id }, data: { costPerUnit: "2.50" } }); // real value
 
-    const first = await fillEmptyFields({ windowDays: 35 });
+    const first = await fillEmptyFields({ windowDays: 35, merchantId: T.merchantId });
     const costs = first.fields.filter((f) => f.field === "costPerUnit").map((f) => f.label).sort();
     expect(costs).toEqual(["Burger Bun", "Lettuce", "Mayonnaise"]);
     expect((await prisma.ingredient.findUniqueOrThrow({ where: { id: s.patty.id } })).costPerUnit!.toString()).toBe("2.5");
@@ -51,21 +51,21 @@ describe("fillEmptyFields", () => {
     const burger = await prisma.menuItem.findUniqueOrThrow({ where: { id: s.burger.id } });
     expect(burger.isPreparedAhead).toBe(false);
     expect(burger.aliases).toEqual(["burger", "burger ayam"]);
-    const store = await prisma.storeSetting.findUniqueOrThrow({ where: { id: 1 } });
+    const store = await prisma.storeSetting.findUniqueOrThrow({ where: { merchantId: T.merchantId } });
     expect([store.openTime, store.closeTime]).toEqual(["07:00", "21:00"]);
     expect(first.insertedExpenseIds.length).toBe(13);
     expect(await prisma.expense.count({ where: { isSimulated: true } })).toBe(13);
 
-    const second = await fillEmptyFields({ windowDays: 35 });
+    const second = await fillEmptyFields({ windowDays: 35, merchantId: T.merchantId });
     expect(second.fields).toEqual([]);
     expect(second.insertedExpenseIds).toEqual([]);
   });
 
   it("adds dummy running costs only for categories that have none", async () => {
     await prisma.expense.create({
-      data: { name: "Real rent", category: "RENT", amount: "5200", frequency: "MONTHLY", startDate: new Date("2026-01-01T00:00:00Z") },
+      data: { merchantId: T.merchantId, name: "Real rent", category: "RENT", amount: "5200", frequency: "MONTHLY", startDate: new Date("2026-01-01T00:00:00Z") },
     });
-    const r = await fillEmptyFields({ windowDays: 35 });
+    const r = await fillEmptyFields({ windowDays: 35, merchantId: T.merchantId });
     expect(r.insertedExpenseCategories).not.toContain("RENT");
     expect(await prisma.expense.count({ where: { category: "RENT" } })).toBe(1);
   });
@@ -74,25 +74,52 @@ describe("fillEmptyFields", () => {
 describe("simulated history", () => {
   it("simulates only the given days, never changes stock, and can be removed per day", async () => {
     const s = await seedBurgerScenario();
-    await fillEmptyFields({ windowDays: 35 });
+    await fillEmptyFields({ windowDays: 35, merchantId: T.merchantId });
     const today = localDate(new Date());
     const days = [addDays(today, -2), addDays(today, -1)];
 
-    const r = await simulateDays(days, { windowDays: 35 });
+    const r = await simulateDays(days, { branchId: T.branchId, windowDays: 35 });
     expect(r.orders).toBeGreaterThan(0);
     expect(await prisma.order.count({ where: { isSimulated: false } })).toBe(0);
     expect(await stockOf(s.patty.id)).toBe("15");
     expect(await prisma.inventoryMovement.count()).toBe(0);
 
-    const cov = await historyCoverage(35, "Asia/Kuala_Lumpur");
+    const cov = await historyCoverage(35, "Asia/Kuala_Lumpur", T.branchId);
     expect(cov.needing).not.toContain(days[0]);
     expect(cov.needing.length).toBe(33);
 
-    const removed = await removeSimulated({ days: [days[0]] });
+    const removed = await removeSimulated({ merchantId: T.merchantId, days: [days[0]] });
     expect(removed.orders).toBeGreaterThan(0);
-    const after = await historyCoverage(35, "Asia/Kuala_Lumpur");
+    const after = await historyCoverage(35, "Asia/Kuala_Lumpur", T.branchId);
     expect(after.needing).toContain(days[0]);
     expect(after.needing).not.toContain(days[1]);
+  });
+
+  it("generates history per branch, scaled, and keeps branches apart", async () => {
+    await seedBurgerScenario();
+    await fillEmptyFields({ windowDays: 35, merchantId: T.merchantId });
+    const other = await addBranch("skudai");
+    const today = localDate(new Date());
+    const days = Array.from({ length: 14 }, (_, i) => addDays(today, -14 + i));
+    const hq = await simulateDays(days, { branchId: T.branchId, windowDays: 35 });
+    const small = await simulateDays(days, { branchId: other.id, windowDays: 35, scale: 0.5 });
+    expect(small.targetRevenuePerDay).toBeCloseTo(hq.targetRevenuePerDay / 2);
+    expect(await prisma.order.count({ where: { branchId: other.id } })).toBe(small.orders);
+    expect(small.orders).toBeLessThan(hq.orders);
+    expect((await historyCoverage(35, "Asia/Kuala_Lumpur", other.id)).withData).toBe(14);
+    await removeSimulated({ merchantId: T.merchantId, branchId: other.id });
+    expect(await prisma.order.count({ where: { branchId: other.id } })).toBe(0);
+    expect(await prisma.order.count({ where: { branchId: T.branchId } })).toBe(hq.orders);
+  });
+
+  it("can stop at a time of day (today so far)", async () => {
+    await seedBurgerScenario();
+    await fillEmptyFields({ windowDays: 35, merchantId: T.merchantId });
+    const today = localDate(new Date());
+    const until = new Date();
+    await simulateDays([today], { branchId: T.branchId, windowDays: 35, until });
+    const late = await prisma.order.count({ where: { createdAt: { gt: until } } });
+    expect(late).toBe(0);
   });
 });
 
@@ -123,7 +150,7 @@ describe("real-data patterns", () => {
     await seedBurgerScenario();
     const today = localDate(new Date());
     const days = Array.from({ length: 28 }, (_, i) => addDays(today, -28 + i));
-    const r = await simulateDays(days, { windowDays: 365, staff: 3 });
+    const r = await simulateDays(days, { branchId: T.branchId, windowDays: 365, staff: 3 });
     expect(r.targetRevenuePerDay).toBe(r.staff * 283);
     const rows = await prisma.$queryRawUnsafe<{ dow: number; n: number }[]>(
       `SELECT EXTRACT(ISODOW FROM ((created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kuala_Lumpur'))::int AS dow, COUNT(*)::int AS n

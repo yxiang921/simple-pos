@@ -7,10 +7,12 @@ import { Minus, Plus } from "lucide-react";
 import type { GuestMenu, GuestMenuItem } from "@/lib/services/menu";
 import { centsToString, formatRM, toCents } from "@/lib/format";
 import { Dialog } from "@/components/ui/dialog";
-import { cart, MAX_PER_ITEM, useCart } from "./cart-store";
+import { MAX_PER_ITEM, useCart, useCartActions } from "./cart-store";
+import { saveGuestPrefs, useShop } from "./shop-context";
 
 export function MenuBrowser({ menu, acceptingOrders }: { menu: GuestMenu; acceptingOrders: boolean }) {
   const lines = useCart();
+  const { base, branchId } = useShop();
   const qtyById = useMemo(() => new Map(lines.map((l) => [l.menuItemId, l.quantity])), [lines]);
   const [active, setActive] = useState(menu.categories[0]?.id);
   const [detail, setDetail] = useState<GuestMenuItem | null>(null);
@@ -22,17 +24,11 @@ export function MenuBrowser({ menu, acceptingOrders }: { menu: GuestMenu; accept
     return m;
   }, [menu.items]);
 
-  // QR codes can point at the menu (/order?table=5): remember the table for checkout.
+  // QR codes can point at the menu (/s/shop/branch?table=5): remember the table for checkout.
   useEffect(() => {
     const table = new URLSearchParams(window.location.search).get("table");
-    if (!table) return;
-    try {
-      const saved = JSON.parse(localStorage.getItem("pos.guest.v1") ?? "{}");
-      localStorage.setItem("pos.guest.v1", JSON.stringify({ ...saved, table }));
-    } catch {
-      /* storage unavailable */
-    }
-  }, []);
+    if (table) saveGuestPrefs({ table, tableBranch: branchId });
+  }, [branchId]);
 
   // Highlight the category currently in view.
   useEffect(() => {
@@ -111,7 +107,7 @@ export function MenuBrowser({ menu, acceptingOrders }: { menu: GuestMenu; accept
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto max-w-3xl">
             <Link
-              href="/order/cart"
+              href={`${base}/cart`}
               className="flex h-12 items-center justify-between rounded-[4px] bg-primary px-4 text-[15px] font-semibold text-white hover:bg-primary-hover"
             >
               <span className="flex items-center gap-2">
@@ -152,6 +148,7 @@ function MenuRow({
   onOpen: () => void;
 }) {
   const out = soldOut(item);
+  const cart = useCartActions();
   const limit = Math.min(MAX_PER_ITEM, item.maxServings ?? MAX_PER_ITEM);
   return (
     <li className={clsx("flex gap-3 px-4 py-3.5", out && "opacity-60")}>
@@ -269,6 +266,7 @@ function ItemDialog({
   onClose: () => void;
 }) {
   const out = soldOut(item);
+  const cart = useCartActions();
   const limit = Math.max(0, Math.min(MAX_PER_ITEM, item.maxServings ?? MAX_PER_ITEM) - inCart);
   const [qty, setQty] = useState(1);
 

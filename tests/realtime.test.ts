@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { dbSchema } from "@/lib/db-schema";
 import { changeHub, CHANNEL, type HubMessage } from "@/lib/realtime";
 import { createOrder, updateOrderStatus } from "@/lib/services/orders";
-import { orderInput, resetDb, seedBurgerScenario } from "./helpers";
+import { orderInput, resetDb, seedBurgerScenario, T } from "./helpers";
 
 beforeEach(resetDb);
 afterAll(async () => {
@@ -21,20 +21,23 @@ async function until(check: () => boolean, ms = 8000) {
 }
 
 describe("database change notifications", () => {
-  it("triggers send one notification per statement, tagged with schema and table", async () => {
+  it("triggers send one notification per statement, tagged with schema, table, merchant and branch", async () => {
     const client = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
     await client.connect();
     await client.query(`LISTEN ${CHANNEL}`);
-    const got: { schema: string; table: string; op: string }[] = [];
+    const got: { schema: string; table: string; op: string; m?: string | null; b?: string | null }[] = [];
     client.on("notification", (m) => got.push(JSON.parse(m.payload!)));
 
     const s = await seedBurgerScenario();
     got.length = 0;
-    await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 1 }]));
-    await until(() => got.some((g) => g.table === "orders" && g.op === "INSERT") && got.some((g) => g.table === "ingredients"));
+    await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]));
+    await until(() => got.some((g) => g.table === "orders" && g.op === "INSERT") && got.some((g) => g.table === "ingredient_stocks"));
     expect(got.every((g) => g.schema === dbSchema())).toBe(true);
-    // 4 ingredient updates in one transaction collapse into a single notification
-    expect(got.filter((g) => g.table === "ingredients" && g.op === "UPDATE")).toHaveLength(1);
+    // 4 stock updates in one transaction collapse into a single notification for the branch
+    const stock = got.filter((g) => g.table === "ingredient_stocks" && g.op === "UPDATE");
+    expect(stock).toHaveLength(1);
+    expect(stock[0].b).toBe(T.branchId);
+    expect(got.find((g) => g.table === "orders" && g.op === "INSERT")!.b).toBe(T.branchId);
     await client.end();
   });
 
@@ -44,8 +47,10 @@ describe("database change notifications", () => {
     const unsubscribe = changeHub.subscribe((m) => msgs.push(m));
     await until(() => changeHub.status === "live");
 
-    const o = await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 1 }]));
+    const o = await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]));
     await until(() => msgs.some((m) => m.type === "change" && m.event.table === "orders" && m.event.op === "INSERT"));
+    const ins = msgs.find((m) => m.type === "change" && m.event.table === "orders" && m.event.op === "INSERT");
+    expect(ins?.type === "change" && ins.event.merchantId).toBe(T.merchantId); // resolved from the branch
 
     await updateOrderStatus(o.id, "PREPARING");
     await until(() => msgs.some((m) => m.type === "change" && m.event.id === o.id && m.event.status === "PREPARING"));

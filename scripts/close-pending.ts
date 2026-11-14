@@ -4,6 +4,7 @@
  *   npm run orders:close-pending -- --dry-run     # list them, change nothing
  *   npm run orders:close-pending                  # mark them COMPLETED (stock stays deducted)
  *   npm run orders:close-pending -- --cancel      # CANCEL them instead (ingredients go back to stock)
+ *   npm run orders:close-pending -- --merchant=kopi-co   # only one merchant (default: all merchants)
  *
  * Uses the same order services as the app, so stock and inventory movements stay
  * consistent and open pages update live.
@@ -14,21 +15,31 @@ import { dbSchema } from "../lib/db-schema";
 import { cancelOrder, updateOrderStatus } from "../lib/services/orders";
 import { requireCurrentClient } from "./lib/client-check";
 
-const args = new Set(process.argv.slice(2).map((a) => a.replace(/^--/, "")));
+const argv = process.argv.slice(2).map((a) => a.replace(/^--/, ""));
+const args = new Set(argv);
 const DRY = args.has("dry-run");
 const CANCEL = args.has("cancel");
+const MERCHANT = argv.find((a) => a.startsWith("merchant="))?.slice(9);
 
 async function main() {
   requireCurrentClient();
   const pending = await prisma.order.findMany({
-    where: { status: "PENDING" },
+    where: { status: "PENDING", ...(MERCHANT ? { branch: { merchant: { slug: MERCHANT } } } : {}) },
     orderBy: { createdAt: "asc" },
-    select: { id: true, orderNumber: true, customerName: true, tableNumber: true, createdAt: true, isSimulated: true },
+    select: {
+      id: true,
+      orderNumber: true,
+      customerName: true,
+      tableNumber: true,
+      createdAt: true,
+      isSimulated: true,
+      branch: { select: { name: true, merchant: { select: { slug: true } } } },
+    },
   });
   console.log(`Schema: ${dbSchema()} · ${pending.length} pending order(s)`);
   for (const o of pending) {
     console.log(
-      `  #${String(o.orderNumber).padStart(4, "0")}  ${o.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC  ${o.customerName}` +
+      `  #${String(o.orderNumber).padStart(4, "0")}  ${o.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC  ${o.branch.merchant.slug}/${o.branch.name}  ${o.customerName}` +
         `${o.tableNumber ? ` · table ${o.tableNumber}` : ""}${o.isSimulated ? " · simulated" : ""}`,
     );
   }

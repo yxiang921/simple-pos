@@ -49,7 +49,19 @@ const NEXT_STEP: Record<FloorOrder["status"], { status: "PREPARING" | "READY" | 
   READY: { status: "COMPLETED", label: "Complete" },
 };
 
-export function FloorView({ data, focusTable = null }: { data: FloorData; focusTable?: string | null }) {
+export function FloorView({
+  data,
+  focusTable = null,
+  branchName = null,
+  sharedPlan = false,
+}: {
+  data: FloorData;
+  focusTable?: string | null;
+  /** Shown in the title when the merchant has several branches. */
+  branchName?: string | null;
+  /** The plan is shared by several branches: say so in the editor. */
+  sharedPlan?: boolean;
+}) {
   const router = useRouter();
   const toast = useToast();
   const apiRef = useRef<SceneApi | null>(null);
@@ -166,10 +178,10 @@ export function FloorView({ data, focusTable = null }: { data: FloorData; focusT
   return (
     <>
       <PageHeader
-        title="Floor"
+        title={branchName ? `Floor · ${branchName}` : "Floor"}
         description={
           mode === "edit"
-            ? "Drag furniture to move it. Select an object to change its size, seats or table number."
+            ? `Drag furniture to move it. Select an object to change its size, seats or table number.${sharedPlan ? " The layout is shared by all branches." : ""}`
             : `Live table status — green is free; yellow turns red as an order waits (fully red after ${data.alertMinutes} min).`
         }
         actions={

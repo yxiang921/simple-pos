@@ -6,6 +6,7 @@ import { clsx } from "clsx";
 import { Check } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { formatOrderNumber, formatRM, formatTime, ORDER_STATUS_LABEL } from "@/lib/format";
+import { getGuestShop, guestPath } from "@/lib/tenant";
 
 export const metadata: Metadata = { title: "Order placed", robots: { index: false } };
 
@@ -18,12 +19,16 @@ const STEP_TEXT: Record<string, string> = {
   CANCELLED: "This order was cancelled. Please speak to our staff if this is unexpected.",
 };
 
-export default async function OrderSuccessPage({ params }: PageProps<"/order/success/[orderId]">) {
+export default async function OrderSuccessPage({ params }: PageProps<"/s/[merchant]/[branch]/success/[orderId]">) {
   await connection();
-  const { orderId } = await params;
+  const { orderId, merchant, branch } = await params;
   if (orderId.length > 64) notFound();
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
+  const shop = await getGuestShop(merchant, branch);
+  if (!shop) notFound();
+  const base = guestPath(shop.merchant.slug, shop.branch.slug);
+  // Only this branch's orders are shown under its URL.
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, branchId: shop.branch.id },
     include: { items: { orderBy: { menuItemNameSnapshot: "asc" } } },
   });
   if (!order) notFound();
@@ -91,7 +96,7 @@ export default async function OrderSuccessPage({ params }: PageProps<"/order/suc
 
       <div className="mt-5 px-4 text-center sm:px-0">
         <Link
-          href="/order"
+          href={base}
           className="inline-flex h-11 items-center rounded-[4px] border border-line-strong bg-surface px-5 text-[14px] font-medium hover:bg-hover"
         >
           Order something else

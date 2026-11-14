@@ -1,4 +1,4 @@
-// Restaurant POS & Inventory — PostgreSQL schema
+// Restaurant POS & Inventory (multi-merchant SaaS) — PostgreSQL schema
 // Money: NUMERIC(10,2). Ingredient quantities: NUMERIC(14,3) in base units (pcs, g, ml).
 
 generator client {
@@ -11,10 +11,63 @@ datasource db {
   provider = "postgresql"
 }
 
+// ─── Tenants: merchants and their branches ─────────────────────────────
+// Shared by a merchant's branches: menu, categories, recipes, ingredient
+// catalog, settings, floor plan and running costs. Per branch: orders, stock,
+// stock movements, daily prep, sold-out events and item availability.
+
+model Merchant {
+  id            String         @id @default(cuid())
+  /// URL name, e.g. "kopico" in /s/kopico/hq
+  slug          String         @unique
+  name          String
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  branches      Branch[]
+  users         AdminUser[]
+  settings      StoreSetting?
+  categories    Category[]
+  menuItems     MenuItem[]
+  ingredients   Ingredient[]
+  expenses      Expense[]
+  floorObjects  FloorObject[]
+
+  @@map("merchants")
+}
+
+model Branch {
+  id             String              @id @default(cuid())
+  merchantId     String              @map("merchant_id")
+  merchant       Merchant            @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  /// URL name within the merchant, e.g. "hq" or "mount-austin"
+  slug           String
+  name           String
+  /// Exactly one headquarters branch per merchant.
+  isHeadquarters Boolean             @default(false) @map("is_headquarters")
+  address        String              @default("")
+  isActive       Boolean             @default(true) @map("is_active")
+  sortOrder      Int                 @default(0) @map("sort_order")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  orders         Order[]
+  stocks         IngredientStock[]
+  movements      InventoryMovement[]
+  dailyPreps     DailyPrep[]
+  soldOutEvents  SoldOutEvent[]
+  menuStatus     BranchMenuItem[]
+
+  @@unique([merchantId, slug])
+  @@index([merchantId])
+  @@map("branches")
+}
+
 // ─── Auth ──────────────────────────────────────────────────────────────
 
+/// Merchant owner accounts. Every account has full rights over all of its merchant's branches.
 model AdminUser {
   id           String         @id @default(cuid())
+  merchantId   String         @map("merchant_id")
+  merchant     Merchant       @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   email        String         @unique
   name         String         @default("Administrator")
   passwordHash String         @map("password_hash")
@@ -22,6 +75,7 @@ model AdminUser {
   updatedAt    DateTime       @updatedAt @map("updated_at")
   sessions     AdminSession[]
 
+  @@index([merchantId])
   @@map("admin_users")
 }
 
@@ -38,10 +92,12 @@ model AdminSession {
   @@map("admin_sessions")
 }
 
-// ─── Store settings (singleton row id = 1) ─────────────────────────────
+// ─── Store settings (one row per merchant, shared by all its branches) ──
 
 model StoreSetting {
-  id              Int      @id @default(1)
+  id              Int      @id @default(autoincrement())
+  merchantId      String   @unique @map("merchant_id")
+  merchant        Merchant @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   storeName       String   @default("Kopi & Co.") @map("store_name")
   acceptingOrders Boolean  @default(true) @map("accepting_orders")
   /// "HH:MM" (24h) in `timezone`; null = not set.
@@ -61,20 +117,25 @@ model StoreSetting {
 // ─── Menu ──────────────────────────────────────────────────────────────
 
 model Category {
-  id        String     @id @default(cuid())
-  name      String     @unique
+  id         String     @id @default(cuid())
+  merchantId String     @map("merchant_id")
+  merchant   Merchant   @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  name      String
   sortOrder Int        @default(0) @map("sort_order")
   isActive  Boolean    @default(true) @map("is_active")
   createdAt DateTime   @default(now()) @map("created_at")
   updatedAt DateTime   @updatedAt @map("updated_at")
   menuItems MenuItem[]
 
+  @@unique([merchantId, name])
   @@index([sortOrder])
   @@map("categories")
 }
 
 model MenuItem {
   id          String               @id @default(cuid())
+  merchantId  String               @map("merchant_id")
+  merchant    Merchant             @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   categoryId  String               @map("category_id")
   category    Category             @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   name        String
@@ -94,7 +155,9 @@ model MenuItem {
   orderItems  OrderItem[]
   dailyPreps  DailyPrep[]
   soldOutEvents SoldOutEvent[]
+  branchStatus  BranchMenuItem[]
 
+  @@index([merchantId])
   @@index([categoryId])
   @@index([isArchived, isAvailable])
   @@map("menu_items")
@@ -109,13 +172,14 @@ enum BaseUnit {
   ML
 }
 
+/// Ingredient catalog, shared by the merchant's branches. Stock levels live in IngredientStock (per branch).
 model Ingredient {
   id                String               @id @default(cuid())
-  name              String               @unique
-  sku               String?              @unique
+  merchantId        String               @map("merchant_id")
+  merchant          Merchant             @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  name              String
+  sku               String?
   unit              BaseUnit
-  currentStock      Decimal              @default(0) @map("current_stock") @db.Decimal(14, 3)
-  lowStockThreshold Decimal              @default(0) @map("low_stock_threshold") @db.Decimal(14, 3)
   /// RM per ONE base unit (per g / ml / pcs). e.g. chicken RM11/kg = 0.011. null = unknown.
   costPerUnit       Decimal?             @map("cost_per_unit") @db.Decimal(14, 6)
   isActive          Boolean              @default(true) @map("is_active")
@@ -124,9 +188,43 @@ model Ingredient {
   recipes           MenuItemIngredient[]
   orderIngredients  OrderIngredient[]
   movements         InventoryMovement[]
+  stocks            IngredientStock[]
 
+  @@unique([merchantId, name])
+  @@unique([merchantId, sku])
   @@index([isActive])
   @@map("ingredients")
+}
+
+/// Stock of one ingredient at one branch (base units).
+model IngredientStock {
+  id                String     @id @default(cuid())
+  branchId          String     @map("branch_id")
+  branch            Branch     @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  ingredientId      String     @map("ingredient_id")
+  ingredient        Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  currentStock      Decimal    @default(0) @map("current_stock") @db.Decimal(14, 3)
+  lowStockThreshold Decimal    @default(0) @map("low_stock_threshold") @db.Decimal(14, 3)
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  @@unique([branchId, ingredientId])
+  @@index([ingredientId])
+  @@map("ingredient_stocks")
+}
+
+/// Per-branch availability of a shared menu item (no row = available).
+model BranchMenuItem {
+  id          String   @id @default(cuid())
+  branchId    String   @map("branch_id")
+  branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  menuItemId  String   @map("menu_item_id")
+  menuItem    MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  isAvailable Boolean  @default(true) @map("is_available")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([branchId, menuItemId])
+  @@index([menuItemId])
+  @@map("branch_menu_items")
 }
 
 model MenuItemIngredient {
@@ -159,6 +257,8 @@ enum PaymentStatus {
 
 model Order {
   id              String            @id @default(cuid())
+  branchId        String            @map("branch_id")
+  branch          Branch            @relation(fields: [branchId], references: [id], onDelete: Restrict)
   orderNumber     Int               @unique @default(autoincrement()) @map("order_number")
   customerName    String            @map("customer_name")
   tableNumber     String?           @map("table_number")
@@ -180,6 +280,8 @@ model Order {
   ingredients     OrderIngredient[]
   movements       InventoryMovement[]
 
+  @@index([branchId, createdAt])
+  @@index([branchId, status])
   @@index([status])
   @@index([createdAt])
   @@index([isSimulated, createdAt])
@@ -228,6 +330,8 @@ enum MovementType {
 
 model InventoryMovement {
   id             String       @id @default(cuid())
+  branchId       String       @map("branch_id")
+  branch         Branch       @relation(fields: [branchId], references: [id], onDelete: Restrict)
   ingredientId   String       @map("ingredient_id")
   ingredient     Ingredient   @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
   orderId        String?      @map("order_id")
@@ -240,6 +344,7 @@ model InventoryMovement {
   createdBy      String?      @map("created_by")
   createdAt      DateTime     @default(now()) @map("created_at")
 
+  @@index([branchId, createdAt])
   @@index([ingredientId, createdAt])
   @@index([orderId])
   @@index([movementType])
@@ -252,6 +357,8 @@ model InventoryMovement {
 /// Plates prepared in the morning per menu item per business day (Malaysia date).
 model DailyPrep {
   id             String   @id @default(cuid())
+  branchId       String   @map("branch_id")
+  branch         Branch   @relation(fields: [branchId], references: [id], onDelete: Restrict)
   date           DateTime @db.Date
   menuItemId     String   @map("menu_item_id")
   menuItem       MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
@@ -260,7 +367,7 @@ model DailyPrep {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  @@unique([date, menuItemId])
+  @@unique([branchId, date, menuItemId])
   @@index([menuItemId])
   @@map("daily_prep")
 }
@@ -268,11 +375,14 @@ model DailyPrep {
 /// Recorded whenever a menu item is switched from available to unavailable.
 model SoldOutEvent {
   id          String   @id @default(cuid())
+  branchId    String   @map("branch_id")
+  branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Restrict)
   menuItemId  String   @map("menu_item_id")
   menuItem    MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
   soldOutAt   DateTime @default(now()) @map("sold_out_at")
   isSimulated Boolean  @default(false) @map("is_simulated")
 
+  @@index([branchId, soldOutAt])
   @@index([menuItemId, soldOutAt])
   @@index([soldOutAt])
   @@map("sold_out_events")
@@ -304,6 +414,8 @@ enum ExpenseFrequency {
 /// ONE_TIME entries are charged in full on start_date.
 model Expense {
   id        String           @id @default(cuid())
+  merchantId String          @map("merchant_id")
+  merchant  Merchant         @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   name      String
   category  ExpenseCategory
   /// RM per occurrence of `frequency` (e.g. per month for MONTHLY).
@@ -316,6 +428,7 @@ model Expense {
   createdAt DateTime         @default(now()) @map("created_at")
   updatedAt DateTime         @updatedAt @map("updated_at")
 
+  @@index([merchantId])
   @@index([category])
   @@index([startDate, endDate])
   @@map("expenses")
@@ -345,10 +458,12 @@ enum FloorShape {
 /// replaced freely.
 model FloorObject {
   id          String          @id @default(cuid())
+  merchantId  String          @map("merchant_id")
+  merchant    Merchant        @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   kind        FloorObjectKind
   label       String
   /// TABLE only. Normalised table number (e.g. "5" for "T05"), matched against orders.table_number.
-  tableNumber String?         @unique @map("table_number")
+  tableNumber String?         @map("table_number")
   /// TABLE only.
   seats       Int?
   shape       FloorShape      @default(RECT)
@@ -361,5 +476,7 @@ model FloorObject {
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
 
+  @@unique([merchantId, tableNumber])
+  @@index([merchantId])
   @@map("floor_objects")
 }

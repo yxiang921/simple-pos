@@ -112,12 +112,12 @@ export function LiveIndicator({ className }: { className?: string }) {
 }
 
 /** Guest pages: menu changes everywhere, plus the order's own status on the confirmation page. */
-export function GuestLiveUpdates() {
+export function GuestLiveUpdates({ base }: { base: string }) {
   const pathname = usePathname();
-  const orderId = /^\/order\/success\/([^/]+)/.exec(pathname)?.[1];
+  const orderId = pathname.startsWith(`${base}/success/`) ? pathname.slice(base.length + 9).split("/")[0] : undefined;
   return (
     <LiveUpdates
-      url={orderId ? `/order/events?order=${encodeURIComponent(orderId)}` : "/order/events"}
+      url={orderId ? `${base}/events?order=${encodeURIComponent(orderId)}` : `${base}/events`}
       minIntervalMs={orderId ? 1000 : 3000}
       fallbackSeconds={orderId ? 15 : 60}
     />

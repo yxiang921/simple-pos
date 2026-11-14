@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/db";
+import { requireContext } from "@/lib/tenant";
 import { PageHeader } from "@/components/ui/misc";
 import { MenuTabs } from "../menu-tabs";
 import { CategoryManager } from "./category-manager";
@@ -7,7 +8,9 @@ import { CategoryManager } from "./category-manager";
 export const metadata: Metadata = { title: "Categories" };
 
 export default async function CategoriesPage() {
+  const ctx = await requireContext();
   const categories = await prisma.category.findMany({
+    where: { merchantId: ctx.merchant.id },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     include: { _count: { select: { menuItems: { where: { isArchived: false } } } } },
   });

@@ -3,6 +3,9 @@
  * generating simulated order history. Used by scripts/simulate-history.ts and
  * scripts/check-data.ts. Every write here only fills what is EMPTY (null, empty
  * list, missing row, day without data) — existing values are never overwritten.
+ *
+ * Multi-merchant: catalog fields, settings and running costs are per merchant;
+ * order history, prep and sold-out events are generated per branch.
  */
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -23,8 +26,8 @@ export const DUMMY_NOTE = "Dummy value — replace with your real figure";
 
 // ─── store ─────────────────────────────────────────────────────────────
 
-export async function storeInfo() {
-  const s = await prisma.storeSetting.findUnique({ where: { id: 1 } });
+export async function storeInfo(merchantId: string) {
+  const s = await prisma.storeSetting.findUnique({ where: { merchantId } });
   return {
     exists: !!s,
     name: s?.storeName ?? null,
@@ -112,6 +115,7 @@ export function dummyAliases(name: string): string[] {
 
 export type FieldChange = {
   table: "ingredients" | "menu_items" | "store_settings";
+  /** Row id (store_settings: the merchant id). */
   id: string;
   label: string;
   field: "costPerUnit" | "isPreparedAhead" | "aliases" | "openTime" | "closeTime";
@@ -134,10 +138,11 @@ export type FillResult = {
  * - store_settings row / open_time / close_time (null)
  * - expenses: demo running costs for each category that has none at all
  */
-export async function fillEmptyFields(opts: { windowDays: number }): Promise<FillResult> {
+export async function fillEmptyFields(opts: { windowDays: number; merchantId: string }): Promise<FillResult> {
   const fields: FieldChange[] = [];
+  const { merchantId } = opts;
 
-  const ings = await prisma.ingredient.findMany({ where: { costPerUnit: null }, orderBy: { name: "asc" } });
+  const ings = await prisma.ingredient.findMany({ where: { merchantId, costPerUnit: null }, orderBy: { name: "asc" } });
   for (const i of ings) {
     const guess = dummyCost(i);
     const perBase = costPerBaseUnit(guess.perDisplayUnit, DISPLAY_UNIT[i.unit], i.unit)!;
@@ -156,7 +161,7 @@ export async function fillEmptyFields(opts: { windowDays: number }): Promise<Fil
   }
 
   const items = await prisma.menuItem.findMany({
-    where: { isArchived: false, OR: [{ isPreparedAhead: null }, { aliases: { isEmpty: true } }] },
+    where: { merchantId, isArchived: false, OR: [{ isPreparedAhead: null }, { aliases: { isEmpty: true } }] },
     include: { category: { select: { name: true } } },
     orderBy: { name: "asc" },
   });
@@ -186,30 +191,31 @@ export async function fillEmptyFields(opts: { windowDays: number }): Promise<Fil
   }
 
   let createdStoreSettings = false;
-  const s = await prisma.storeSetting.findUnique({ where: { id: 1 } });
+  const s = await prisma.storeSetting.findUnique({ where: { merchantId } });
   if (!s) {
-    await prisma.storeSetting.create({ data: { id: 1, ...DEMO_HOURS } });
+    const m = await prisma.merchant.findUniqueOrThrow({ where: { id: merchantId }, select: { name: true } });
+    await prisma.storeSetting.create({ data: { merchantId, storeName: m.name, ...DEMO_HOURS } });
     createdStoreSettings = true;
-    fields.push({ table: "store_settings", id: "1", label: "Store", field: "openTime", before: null, after: DEMO_HOURS.openTime });
-    fields.push({ table: "store_settings", id: "1", label: "Store", field: "closeTime", before: null, after: DEMO_HOURS.closeTime });
+    fields.push({ table: "store_settings", id: merchantId, label: "Store", field: "openTime", before: null, after: DEMO_HOURS.openTime });
+    fields.push({ table: "store_settings", id: merchantId, label: "Store", field: "closeTime", before: null, after: DEMO_HOURS.closeTime });
   } else {
     for (const f of ["openTime", "closeTime"] as const) {
       if (!s[f]) {
-        await prisma.storeSetting.update({ where: { id: 1 }, data: { [f]: DEMO_HOURS[f] } });
-        fields.push({ table: "store_settings", id: "1", label: "Store", field: f, before: null, after: DEMO_HOURS[f] });
+        await prisma.storeSetting.update({ where: { merchantId }, data: { [f]: DEMO_HOURS[f] } });
+        fields.push({ table: "store_settings", id: merchantId, label: "Store", field: f, before: null, after: DEMO_HOURS[f] });
       }
     }
   }
 
   // Running costs: add the demo entries for every category that has none yet.
-  const existingCats = new Set((await prisma.expense.groupBy({ by: ["category"] })).map((g) => g.category));
+  const existingCats = new Set((await prisma.expense.groupBy({ by: ["category"], where: { merchantId } })).map((g) => g.category));
   const missing = DEMO_EXPENSES.filter((e) => !existingCats.has(e.category));
-  const tz = (await storeInfo()).tz;
+  const tz = (await storeInfo(merchantId)).tz;
   const start = `${addDays(localDate(new Date(), tz), -opts.windowDays).slice(0, 7)}-01`;
   const insertedExpenseIds: string[] = [];
   for (const e of missing) {
     const row = await prisma.expense.create({
-      data: { ...e, startDate: dateColumn(start), notes: DUMMY_NOTE, isSimulated: true },
+      data: { ...e, merchantId, startDate: dateColumn(start), notes: DUMMY_NOTE, isSimulated: true },
       select: { id: true },
     });
     insertedExpenseIds.push(row.id);
@@ -227,8 +233,8 @@ export async function fillEmptyFields(opts: { windowDays: number }): Promise<Fil
 
 export type DayCoverage = { day: string; real: number; sim: number };
 
-/** Per local day in [today - windowDays, today): real and simulated order counts. */
-export async function historyCoverage(windowDays: number, tz: string) {
+/** Per local day in [today - windowDays, today): one branch's real and simulated order counts. */
+export async function historyCoverage(windowDays: number, tz: string, branchId: string) {
   const today = localDate(new Date(), tz);
   const first = addDays(today, -windowDays);
   const start = dayRangeUtc(first, tz).start;
@@ -238,7 +244,7 @@ export async function historyCoverage(windowDays: number, tz: string) {
            COUNT(*) FILTER (WHERE NOT o.is_simulated AND o.status <> 'CANCELLED') AS real,
            COUNT(*) FILTER (WHERE o.is_simulated) AS sim
     FROM ${table("orders")} o
-    WHERE o.created_at >= ${start} AND o.created_at < ${end}
+    WHERE o.branch_id = ${branchId} AND o.created_at >= ${start} AND o.created_at < ${end}
     GROUP BY 1`;
   const byDay = new Map(rows.map((r) => [r.day, { real: Number(r.real), sim: Number(r.sim) }]));
   const days: DayCoverage[] = [];
@@ -385,9 +391,9 @@ export function marketFactor(p: RealPatterns, d: string, today: string) {
 }
 
 /** Number of staff the shop is sized for: active salary entries in Costs (EPF/SOCSO lines excluded), else 4. */
-export async function staffCount(today: string): Promise<number> {
+export async function staffCount(today: string, merchantId: string): Promise<number> {
   const rows = await prisma.expense.findMany({
-    where: { category: "STAFF", startDate: { lte: dateColumn(today) }, OR: [{ endDate: null }, { endDate: { gte: dateColumn(today) } }] },
+    where: { merchantId, category: "STAFF", startDate: { lte: dateColumn(today) }, OR: [{ endDate: null }, { endDate: { gte: dateColumn(today) } }] },
     select: { name: true },
   });
   const n = rows.filter((r) => !/epf|socso|eis|kwsp|perkeso/i.test(r.name)).length;
@@ -442,26 +448,36 @@ export type SimulationResult = {
 
 /**
  * Generate simulated orders (+ items, ingredient snapshots), daily_prep for
- * prepared-ahead items, and sold-out events for the given local dates, using the
- * real-data patterns in data/real-patterns.json. Deterministic per day. Never
- * changes stock or inventory_movements; never replaces real daily_prep rows.
+ * prepared-ahead items, and sold-out events at one branch for the given local
+ * dates, using the real-data patterns in data/real-patterns.json. Deterministic
+ * per branch and day. `scale` sizes a branch relative to the staff-based shop
+ * size (e.g. 0.7 for a smaller outlet). Never changes stock or
+ * inventory_movements; never replaces real daily_prep rows.
  */
-export async function simulateDays(days: string[], opts: { windowDays: number; seed?: string; staff?: number }): Promise<SimulationResult> {
+export async function simulateDays(
+  days: string[],
+  opts: { branchId: string; windowDays: number; seed?: string; staff?: number; scale?: number; until?: Date },
+): Promise<SimulationResult> {
   const p = loadPatterns();
-  const seed = opts.seed ?? "pos-demo";
-  const store = await storeInfo();
+  const branch = await prisma.branch.findUniqueOrThrow({ where: { id: opts.branchId }, select: { id: true, slug: true, merchantId: true, isHeadquarters: true } });
+  const merchantId = branch.merchantId;
+  const branchId = branch.id;
+  // HQ keeps the original seed so regenerating gives the same history as before.
+  const seed = opts.seed ?? (branch.isHeadquarters ? "pos-demo" : `pos-demo|${branch.slug}`);
+  const scale = opts.scale ?? 1;
+  const store = await storeInfo(merchantId);
   const tz = store.tz;
   const open = minutesOf(store.openTime ?? DEMO_HOURS.openTime);
   const close = minutesOf(store.closeTime ?? DEMO_HOURS.closeTime);
   if (close - open < 120) throw new Error("Opening hours are shorter than 2 hours; set open/close time in Settings.");
   const today = localDate(new Date(), tz);
-  const staff = opts.staff ?? (await staffCount(today));
-  const targetRevenuePerDay = p.malaysia.fb.revenuePerEmployeeDay * staff;
+  const staff = opts.staff ?? (await staffCount(today, merchantId));
+  const targetRevenuePerDay = p.malaysia.fb.revenuePerEmployeeDay * staff * scale;
   const empty = { days, orders: 0, plates: 0, prepRows: 0, soldOuts: 0, missed: 0, staff, targetRevenuePerDay };
   if (days.length === 0) return empty;
 
   const items = await prisma.menuItem.findMany({
-    where: { isArchived: false },
+    where: { merchantId, isArchived: false },
     include: {
       category: { select: { name: true } },
       recipe: { include: { ingredient: { select: { id: true, name: true, unit: true } } } },
@@ -514,7 +530,7 @@ export async function simulateDays(days: string[], opts: { windowDays: number; s
   const weekendHours = hourWeights(p.indonesia.hourly.weekend, open, close);
 
   const realPrep = await prisma.dailyPrep.findMany({
-    where: { date: { in: days.map(dateColumn) }, isSimulated: false },
+    where: { branchId, date: { in: days.map(dateColumn) }, isSimulated: false },
     select: { date: true, menuItemId: true },
   });
   const realPrepKeys = new Set(realPrep.map((x) => `${x.date.toISOString().slice(0, 10)}|${x.menuItemId}`));
@@ -546,7 +562,7 @@ export async function simulateDays(days: string[], opts: { windowDays: number; s
         const usual = weekend ? (pr.dow[5] + pr.dow[6]) / 2 : (pr.dow[0] + pr.dow[1] + pr.dow[2] + pr.dow[3] + pr.dow[4]) / 5;
         const plates = Math.max(0, Math.round(pr.base * usual * mk.season * mk.trend * pr.prepBias));
         if (!realPrepKeys.has(`${day}|${m.id}`)) {
-          preps.push({ id: randomUUID(), date: dateColumn(day), menuItemId: m.id, platesPrepared: plates, isSimulated: true });
+          preps.push({ id: randomUUID(), branchId, date: dateColumn(day), menuItemId: m.id, platesPrepared: plates, isSimulated: true });
         }
         // Every plate sold → item sold out (staff switch it off); extra demand is missed.
         if (plates > 0 && times.length >= plates) {
@@ -554,6 +570,7 @@ export async function simulateDays(days: string[], opts: { windowDays: number; s
           missed += times.length - plates;
           soldOuts.push({
             id: randomUUID(),
+            branchId,
             menuItemId: m.id,
             soldOutAt: zonedTimeToUtc(day, hhmmOf(Math.min(close - 1, sellable[plates - 1] + Math.round(r.between(2, 12)))), tz),
             isSimulated: true,
@@ -605,6 +622,7 @@ export async function simulateDays(days: string[], opts: { windowDays: number; s
       }
       orders.push({
         id: orderId,
+        branchId,
         customerName: r.pick(NAMES),
         tableNumber: r.rand() < 0.7 ? String(1 + Math.floor(r.rand() * 12)) : null,
         status: "COMPLETED",
@@ -617,6 +635,17 @@ export async function simulateDays(days: string[], opts: { windowDays: number; s
         updatedAt: new Date(createdAt.getTime() + Math.round(r.between(8, 25)) * 60_000),
       });
     }
+  }
+
+  // Only up to `until` (e.g. today so far): drop later orders and sold-out events.
+  if (opts.until) {
+    const cut = opts.until.getTime();
+    const keep = new Set(orders.filter((o) => (o.createdAt as Date).getTime() <= cut).map((o) => o.id as string));
+    const filterIn = <T extends { orderId: string }>(xs: T[]) => xs.filter((x) => keep.has(x.orderId));
+    orders.splice(0, orders.length, ...orders.filter((o) => keep.has(o.id as string)));
+    orderItems.splice(0, orderItems.length, ...filterIn(orderItems as (Prisma.OrderItemCreateManyInput & { orderId: string })[]));
+    orderIngs.splice(0, orderIngs.length, ...filterIn(orderIngs as (Prisma.OrderIngredientCreateManyInput & { orderId: string })[]));
+    soldOuts.splice(0, soldOuts.length, ...soldOuts.filter((x) => (x.soldOutAt as Date).getTime() <= cut));
   }
 
   // Chronological insert so order numbers follow time within the simulated block.
@@ -645,20 +674,22 @@ export async function simulateDays(days: string[], opts: { windowDays: number; s
 // ─── removal ───────────────────────────────────────────────────────────
 
 /**
- * Delete simulated orders / prep / sold-out events — all of them, or only for
- * the given local dates. Optionally also the demo running costs.
+ * Delete simulated orders / prep / sold-out events of a merchant (or only one
+ * of its branches) — all of them, or only for the given local dates.
+ * Optionally also the merchant's demo running costs.
  */
-export async function removeSimulated(opts: { days?: string[]; expenses?: boolean } = {}) {
-  const tz = (await storeInfo()).tz;
-  let orderWhere: Prisma.OrderWhereInput = { isSimulated: true };
-  let soldOutWhere: Prisma.SoldOutEventWhereInput = { isSimulated: true };
-  let prepWhere: Prisma.DailyPrepWhereInput = { isSimulated: true };
+export async function removeSimulated(opts: { merchantId: string; branchId?: string; days?: string[]; expenses?: boolean }) {
+  const tz = (await storeInfo(opts.merchantId)).tz;
+  const scope = opts.branchId ? { branchId: opts.branchId, branch: { merchantId: opts.merchantId } } : { branch: { merchantId: opts.merchantId } };
+  let orderWhere: Prisma.OrderWhereInput = { ...scope, isSimulated: true };
+  let soldOutWhere: Prisma.SoldOutEventWhereInput = { ...scope, isSimulated: true };
+  let prepWhere: Prisma.DailyPrepWhereInput = { ...scope, isSimulated: true };
   if (opts.days) {
     if (opts.days.length === 0) return { orders: 0, prep: 0, soldOuts: 0, expenses: 0 };
     const ranges = opts.days.map((d) => dayRangeUtc(d, tz));
-    orderWhere = { isSimulated: true, OR: ranges.map((r) => ({ createdAt: { gte: r.start, lt: r.end } })) };
-    soldOutWhere = { isSimulated: true, OR: ranges.map((r) => ({ soldOutAt: { gte: r.start, lt: r.end } })) };
-    prepWhere = { isSimulated: true, date: { in: opts.days.map(dateColumn) } };
+    orderWhere = { ...scope, isSimulated: true, OR: ranges.map((r) => ({ createdAt: { gte: r.start, lt: r.end } })) };
+    soldOutWhere = { ...scope, isSimulated: true, OR: ranges.map((r) => ({ soldOutAt: { gte: r.start, lt: r.end } })) };
+    prepWhere = { ...scope, isSimulated: true, date: { in: opts.days.map(dateColumn) } };
   }
   const ids = (await prisma.order.findMany({ where: orderWhere, select: { id: true } })).map((o) => o.id);
   for (let i = 0; i < ids.length; i += 1000) {
@@ -670,6 +701,27 @@ export async function removeSimulated(opts: { days?: string[]; expenses?: boolea
   }
   const prep = await prisma.dailyPrep.deleteMany({ where: prepWhere });
   const so = await prisma.soldOutEvent.deleteMany({ where: soldOutWhere });
-  const ex = opts.expenses ? await prisma.expense.deleteMany({ where: { isSimulated: true } }) : { count: 0 };
+  const ex = opts.expenses ? await prisma.expense.deleteMany({ where: { merchantId: opts.merchantId, isSimulated: true } }) : { count: 0 };
   return { orders: ids.length, prep: prep.count, soldOuts: so.count, expenses: ex.count };
+}
+
+// ─── tenancy helpers for scripts ───────────────────────────────────────
+
+/**
+ * Resolve --merchant=<slug> / --branch=<slug> flags. Without --merchant: the only
+ * merchant, else the oldest one (with a note). Without --branch: all branches.
+ */
+export async function resolveTarget(args: { merchant?: string; branch?: string }) {
+  const merchants = await prisma.merchant.findMany({ orderBy: { createdAt: "asc" }, select: { id: true, slug: true, name: true } });
+  if (!merchants.length) throw new Error("No merchants yet. Run `npm run db:seed` or register one at /register.");
+  const merchant = args.merchant ? merchants.find((m) => m.slug === args.merchant) : merchants[0];
+  if (!merchant) throw new Error(`Unknown merchant "${args.merchant}". Known: ${merchants.map((m) => m.slug).join(", ")}`);
+  const all = await prisma.branch.findMany({
+    where: { merchantId: merchant.id },
+    orderBy: [{ isHeadquarters: "desc" }, { sortOrder: "asc" }, { name: "asc" }],
+    select: { id: true, slug: true, name: true, isHeadquarters: true, isActive: true },
+  });
+  const branches = args.branch ? all.filter((b) => b.slug === args.branch) : all;
+  if (args.branch && !branches.length) throw new Error(`Unknown branch "${args.branch}" of ${merchant.slug}. Known: ${all.map((b) => b.slug).join(", ")}`);
+  return { merchant, branches, multipleMerchants: merchants.length > 1 && !args.merchant, merchants };
 }

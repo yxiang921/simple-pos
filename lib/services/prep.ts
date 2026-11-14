@@ -15,30 +15,41 @@ export type PrepRow = {
   soldOutAt: string | null;
 };
 
-async function storeTimezone() {
-  const s = await prisma.storeSetting.findUnique({ where: { id: 1 }, select: { timezone: true } });
-  return s?.timezone || DEFAULT_TZ;
+async function branchMerchant(branchId: string) {
+  const b = await prisma.branch.findUnique({
+    where: { id: branchId },
+    select: { merchantId: true, merchant: { select: { settings: { select: { timezone: true } } } } },
+  });
+  if (!b) throw new DomainError("Branch not found.", "NOT_FOUND");
+  return { merchantId: b.merchantId, timezone: b.merchant.settings?.timezone || DEFAULT_TZ };
 }
 
-/** Prep sheet for one local business date: what was prepared vs sold, and when it sold out. */
-export async function getPrepSheet(date: string): Promise<{ timezone: string; rows: PrepRow[] }> {
-  const timezone = await storeTimezone();
+/** One branch's prep sheet for a local business date: what was prepared vs sold, and when it sold out. */
+export async function getPrepSheet(branchId: string, date: string): Promise<{ timezone: string; rows: PrepRow[] }> {
+  const { merchantId, timezone } = await branchMerchant(branchId);
   const { start, end } = dayRangeUtc(date, timezone);
 
   const [items, preps, sold, soldOuts] = await Promise.all([
     prisma.menuItem.findMany({
-      where: { isArchived: false },
+      where: { merchantId, isArchived: false },
       orderBy: [{ category: { sortOrder: "asc" } }, { name: "asc" }],
-      select: { id: true, name: true, isPreparedAhead: true, isAvailable: true, category: { select: { name: true } } },
+      select: {
+        id: true,
+        name: true,
+        isPreparedAhead: true,
+        isAvailable: true,
+        category: { select: { name: true } },
+        branchStatus: { where: { branchId }, select: { isAvailable: true } },
+      },
     }),
-    prisma.dailyPrep.findMany({ where: { date: dateColumn(date) } }),
+    prisma.dailyPrep.findMany({ where: { branchId, date: dateColumn(date) } }),
     prisma.orderItem.groupBy({
       by: ["menuItemId"],
-      where: { order: { createdAt: { gte: start, lt: end }, status: { not: "CANCELLED" } } },
+      where: { order: { branchId, createdAt: { gte: start, lt: end }, status: { not: "CANCELLED" } } },
       _sum: { quantity: true },
     }),
     prisma.soldOutEvent.findMany({
-      where: { soldOutAt: { gte: start, lt: end } },
+      where: { branchId, soldOutAt: { gte: start, lt: end } },
       orderBy: { soldOutAt: "asc" },
     }),
   ]);
@@ -54,7 +65,7 @@ export async function getPrepSheet(date: string): Promise<{ timezone: string; ro
     name: m.name,
     category: m.category.name,
     isPreparedAhead: m.isPreparedAhead,
-    isAvailable: m.isAvailable,
+    isAvailable: m.isAvailable && m.branchStatus[0]?.isAvailable !== false,
     platesPrepared: prepBy.get(m.id) ?? null,
     prepSimulated: prepSim.has(m.id),
     sold: soldBy.get(m.id) ?? 0,
@@ -70,21 +81,22 @@ export async function getPrepSheet(date: string): Promise<{ timezone: string; ro
  * Save the prep sheet for a date. A number upserts the row; null removes it
  * (unknown is stored as "no row", never as a guessed number).
  */
-export async function savePrep(date: string, entries: { menuItemId: string; plates: number | null }[]) {
+export async function savePrep(branchId: string, date: string, entries: { menuItemId: string; plates: number | null }[]) {
   const day = dateColumn(date);
+  const { merchantId } = await branchMerchant(branchId);
   const ids = entries.map((e) => e.menuItemId);
-  const found = await prisma.menuItem.count({ where: { id: { in: ids } } });
+  const found = await prisma.menuItem.count({ where: { id: { in: ids }, merchantId } });
   if (found !== new Set(ids).size) throw new DomainError("Some menu items no longer exist. Refresh and try again.");
 
   return prisma.$transaction(async (tx) => {
     let saved = 0;
     for (const e of entries) {
       if (e.plates === null) {
-        await tx.dailyPrep.deleteMany({ where: { date: day, menuItemId: e.menuItemId } });
+        await tx.dailyPrep.deleteMany({ where: { branchId, date: day, menuItemId: e.menuItemId } });
       } else {
         await tx.dailyPrep.upsert({
-          where: { date_menuItemId: { date: day, menuItemId: e.menuItemId } },
-          create: { date: day, menuItemId: e.menuItemId, platesPrepared: e.plates },
+          where: { branchId_date_menuItemId: { branchId, date: day, menuItemId: e.menuItemId } },
+          create: { branchId, date: day, menuItemId: e.menuItemId, platesPrepared: e.plates },
           update: { platesPrepared: e.plates, isSimulated: false },
         });
         saved++;

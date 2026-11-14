@@ -16,7 +16,19 @@ function shiftDate(date: string, days: number) {
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
-export function PrepSheet({ date, today, timezone, rows }: { date: string; today: string; timezone: string; rows: PrepRow[] }) {
+export function PrepSheet({
+  branchId,
+  date,
+  today,
+  timezone,
+  rows,
+}: {
+  branchId: string;
+  date: string;
+  today: string;
+  timezone: string;
+  rows: PrepRow[];
+}) {
   const router = useRouter();
   const toast = useToast();
   const [values, setValues] = useState<Record<string, string>>(() =>
@@ -44,7 +56,7 @@ export function PrepSheet({ date, today, timezone, rows }: { date: string; today
       .filter((r) => (r.platesPrepared === null ? "" : String(r.platesPrepared)) !== values[r.menuItemId])
       .map((r) => ({ menuItemId: r.menuItemId, plates: values[r.menuItemId].trim() === "" ? null : values[r.menuItemId].trim() }));
     startTransition(async () => {
-      const res = await savePrepAction({ date, entries: changed });
+      const res = await savePrepAction(branchId, { date, entries: changed });
       if (res.ok) {
         toast(`Prep saved for ${label}`);
         router.refresh();

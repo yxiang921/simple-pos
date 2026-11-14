@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { requireAdmin } from "@/lib/auth/session";
+import { requireContext } from "@/lib/tenant";
 import { runAction } from "@/lib/action-utils";
 import type { ActionResult } from "@/lib/errors";
 import {
@@ -17,15 +17,15 @@ import { categorySchema, idString, menuItemSchema } from "@/lib/validation";
 
 function revalidateMenu() {
   revalidatePath("/admin/menu", "layout");
-  revalidatePath("/order", "layout");
+  revalidatePath("/s", "layout");
 }
 
 /** Payload is a plain object (built by the client form) so the recipe array survives intact. */
 export async function saveMenuItemAction(id: string | null, payload: unknown): Promise<ActionResult> {
-  await requireAdmin();
+  const ctx = await requireContext();
   const res = await runAction(async () => {
     const input = menuItemSchema.parse(payload);
-    await saveMenuItem(id ? idString.parse(id) : null, input);
+    await saveMenuItem(ctx.merchant.id, id ? idString.parse(id) : null, input);
     revalidateMenu();
   });
   if (res.ok) redirect("/admin/menu?saved=1");
@@ -33,35 +33,36 @@ export async function saveMenuItemAction(id: string | null, payload: unknown): P
 }
 
 export async function deleteMenuItemAction(id: string) {
-  await requireAdmin();
+  const ctx = await requireContext();
   return runAction(async () => {
-    const outcome = await deleteMenuItem(idString.parse(id));
+    const outcome = await deleteMenuItem(ctx.merchant.id, idString.parse(id));
     revalidateMenu();
     return outcome;
   });
 }
 
+/** In a branch: on/off at that branch. In "All branches": the shared on/off switch. */
 export async function toggleMenuItemAvailabilityAction(id: string, isAvailable: boolean) {
-  await requireAdmin();
+  const ctx = await requireContext();
   return runAction(async () => {
-    await setMenuItemAvailability(idString.parse(id), z.boolean().parse(isAvailable));
+    await setMenuItemAvailability(ctx.merchant.id, idString.parse(id), z.boolean().parse(isAvailable), ctx.branch?.id ?? null);
     revalidateMenu();
   });
 }
 
 export async function saveCategoryAction(id: string | null, payload: unknown) {
-  await requireAdmin();
+  const ctx = await requireContext();
   return runAction(async () => {
     const input = categorySchema.parse(payload);
-    await saveCategory(id ? idString.parse(id) : null, input);
+    await saveCategory(ctx.merchant.id, id ? idString.parse(id) : null, input);
     revalidateMenu();
   });
 }
 
 export async function deleteCategoryAction(id: string) {
-  await requireAdmin();
+  const ctx = await requireContext();
   return runAction(async () => {
-    await deleteCategory(idString.parse(id));
+    await deleteCategory(ctx.merchant.id, idString.parse(id));
     revalidateMenu();
   });
 }

@@ -1,16 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/auth/session";
+import { requireContext, targetBranch } from "@/lib/tenant";
 import { runAction } from "@/lib/action-utils";
 import { savePrep } from "@/lib/services/prep";
-import { dailyPrepSchema } from "@/lib/validation";
+import { dailyPrepSchema, idString } from "@/lib/validation";
 
-export async function savePrepAction(payload: unknown) {
-  await requireAdmin();
+export async function savePrepAction(branchId: string, payload: unknown) {
+  const ctx = await requireContext();
   return runAction(async () => {
+    const branch = targetBranch(ctx, idString.parse(branchId));
     const input = dailyPrepSchema.parse(payload);
-    const res = await savePrep(input.date, input.entries);
+    const res = await savePrep(branch.id, input.date, input.entries);
     revalidatePath("/admin/prep");
     return res;
   });

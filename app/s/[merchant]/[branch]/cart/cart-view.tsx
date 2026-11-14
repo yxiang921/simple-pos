@@ -10,12 +10,12 @@ import type { TableOption } from "@/lib/services/floor";
 import { normalizeTableNumber } from "@/lib/floor";
 import { centsToString, formatRM, toCents } from "@/lib/format";
 import { Field, Input, Select } from "@/components/ui/form";
-import { cart, cartSignature, MAX_PER_ITEM, useCart } from "../cart-store";
+import { cartSignature, MAX_PER_ITEM, useCart, useCartActions } from "../cart-store";
+import { readGuestPrefs, saveGuestPrefs, useShop } from "../shop-context";
 import { ItemImage, Stepper } from "../menu-browser";
 import { submitOrderAction } from "../actions";
 
 const KEY_STORAGE = "pos.checkout.key.v1";
-const NAME_STORAGE = "pos.guest.v1";
 
 /**
  * One idempotency key per cart content. Retrying the same cart (e.g. after a
@@ -45,6 +45,8 @@ export function CartView({
 }) {
   const router = useRouter();
   const lines = useCart();
+  const cart = useCartActions();
+  const { base, branchId } = useShop();
   const live = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[] | undefined>>({});
@@ -84,11 +86,11 @@ export function CartView({
       setFieldErrors({ customerName: ["Please enter your name"] });
       return;
     }
-    const idempotencyKey = getCheckoutKey(cartSignature(lines) + `|${name.trim()}|${table.trim()}`);
+    const idempotencyKey = getCheckoutKey(`${branchId}|` + cartSignature(lines) + `|${name.trim()}|${table.trim()}`);
     startTransition(async () => {
       let res;
       try {
-        res = await submitOrderAction({
+        res = await submitOrderAction(branchId, {
           customerName: name,
           tableNumber: table,
           idempotencyKey,
@@ -100,11 +102,11 @@ export function CartView({
       }
       if (res.ok) {
         try {
-          localStorage.setItem(NAME_STORAGE, JSON.stringify({ name: name.trim(), table: table.trim() }));
+          saveGuestPrefs({ name: name.trim(), table: table.trim(), tableBranch: branchId });
           sessionStorage.removeItem(KEY_STORAGE);
         } catch {}
         cart.clear();
-        router.replace(`/order/success/${res.orderId}`);
+        router.replace(`${base}/success/${res.orderId}`);
       } else {
         setError(res.error);
         setFieldErrors(res.fieldErrors ?? {});
@@ -120,7 +122,7 @@ export function CartView({
         <p className="text-[15px] font-medium">Your cart is empty</p>
         <p className="mt-1 text-[13px] text-muted">Browse the menu and add something you like.</p>
         <Link
-          href="/order"
+          href={base}
           className="mt-5 inline-flex h-11 items-center rounded-[4px] bg-primary px-5 text-[15px] font-semibold text-white hover:bg-primary-hover"
         >
           Browse menu
@@ -132,7 +134,7 @@ export function CartView({
   return (
     <main className="mx-auto max-w-3xl pb-32 sm:px-4 sm:pt-4">
       <div className="flex items-center justify-between px-4 py-3 sm:px-0">
-        <Link href="/order" className="inline-flex items-center gap-1 text-[14px] text-muted hover:text-ink">
+        <Link href={base} className="inline-flex items-center gap-1 text-[14px] text-muted hover:text-ink">
           <ChevronLeft className="size-4" /> Menu
         </Link>
         <h1 className="text-[17px] font-semibold">Your order</h1>
@@ -236,11 +238,12 @@ function noopSubscribe() {
 
 /** Uncontrolled inputs, prefilled from the last order and from ?table= (QR codes). Client-only. */
 function GuestDetails({ fieldErrors, tables }: { fieldErrors: Record<string, string[] | undefined>; tables: TableOption[] }) {
+  const { branchId } = useShop();
   const [defaults] = useState(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(NAME_STORAGE) ?? "{}") as { name?: string; table?: string };
+      const saved = readGuestPrefs();
       const qrTable = new URLSearchParams(window.location.search).get("table");
-      return { name: saved.name ?? "", table: qrTable ?? saved.table ?? "" };
+      return { name: saved.name ?? "", table: qrTable ?? (saved.tableBranch === branchId ? saved.table : "") ?? "" };
     } catch {
       return { name: "", table: "" };
     }

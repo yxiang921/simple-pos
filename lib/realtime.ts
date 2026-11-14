@@ -15,6 +15,10 @@ import { dbSchema } from "@/lib/db-schema";
  * (port 6543) can't LISTEN; then the status stays "unavailable" and browsers
  * fall back to polling. A self-test NOTIFY (sent through the normal Prisma
  * connection) confirms delivery before reporting "live", and again every minute.
+ *
+ * Events carry the merchant / branch of the changed rows (see migration
+ * 20261116000000_saas_multi_tenant), so each stream only passes on changes of
+ * its own merchant. Events without either (recipe rows) go to everyone.
  */
 
 export const CHANNEL = "pos_changes";
@@ -22,6 +26,9 @@ export const CHANNEL = "pos_changes";
 export type ChangeEvent = {
   table: string;
   op: "INSERT" | "UPDATE" | "DELETE";
+  /** Merchant of the changed rows; null when unknown (delivered to everyone). */
+  merchantId: string | null;
+  branchId: string | null;
   id?: string;
   status?: string;
   paymentStatus?: string;
@@ -52,6 +59,7 @@ class ChangeHub {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private pings = new Map<string, () => void>();
+  private branchMerchant = new Map<string, string>();
 
   subscribe(fn: Listener): () => void {
     this.listeners.add(fn);
@@ -139,9 +147,27 @@ class ChangeHub {
     return arrived;
   }
 
-  private onNotification(payload?: string) {
+  private async merchantOfBranch(branchId: string): Promise<string | null> {
+    const known = this.branchMerchant.get(branchId);
+    if (known) return known;
+    const b = await prisma.branch.findUnique({ where: { id: branchId }, select: { merchantId: true } }).catch(() => null);
+    if (b) this.branchMerchant.set(branchId, b.merchantId);
+    return b?.merchantId ?? null;
+  }
+
+  private async onNotification(payload?: string) {
     if (!payload) return;
-    let e: { schema?: string; table?: string; op?: ChangeEvent["op"]; id?: string; status?: string; paymentStatus?: string; token?: string };
+    let e: {
+      schema?: string;
+      table?: string;
+      op?: ChangeEvent["op"];
+      m?: string | null;
+      b?: string | null;
+      id?: string;
+      status?: string;
+      paymentStatus?: string;
+      token?: string;
+    };
     try {
       e = JSON.parse(payload);
     } catch {
@@ -153,7 +179,11 @@ class ChangeHub {
       if (e.token) this.pings.delete(e.token);
       return;
     }
-    const event: ChangeEvent = { table: e.table, op: e.op ?? "UPDATE" };
+    const branchId = e.b ?? null;
+    let merchantId = e.m ?? null;
+    if (e.table === "merchants" && e.op !== "DELETE") merchantId = null; // a new merchant: refresh platform lists
+    if (!merchantId && branchId) merchantId = await this.merchantOfBranch(branchId);
+    const event: ChangeEvent = { table: e.table, op: e.op ?? "UPDATE", merchantId, branchId };
     if (e.id) Object.assign(event, { id: e.id, status: e.status, paymentStatus: e.paymentStatus });
     for (const l of this.listeners) l({ type: "change", event });
   }

@@ -4,11 +4,12 @@ import { ChevronLeft } from "lucide-react";
 import { PageHeader } from "@/components/ui/misc";
 import { MenuItemForm } from "../menu-item-form";
 import { loadFormOptions } from "../form-data";
+import { requireContext } from "@/lib/tenant";
 
 export const metadata: Metadata = { title: "New menu item" };
 
 export default async function NewMenuItemPage() {
-  const { categories, ingredients } = await loadFormOptions();
+  const { categories, ingredients, stockLabel } = await loadFormOptions(await requireContext());
   return (
     <>
       <Link href="/admin/menu" className="mb-2 inline-flex items-center gap-1 text-[13px] text-muted hover:text-ink">
@@ -19,6 +20,7 @@ export default async function NewMenuItemPage() {
         id={null}
         categories={categories}
         ingredients={ingredients}
+        stockLabel={stockLabel}
         initial={{
           name: "",
           description: "",

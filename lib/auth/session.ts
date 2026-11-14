@@ -48,7 +48,7 @@ export async function destroySession() {
   jar.delete(SESSION_COOKIE);
 }
 
-export type CurrentAdmin = { id: string; email: string; name: string };
+export type CurrentAdmin = { id: string; email: string; name: string; merchantId: string };
 
 /** Validates the session cookie against the database. Memoized per request. */
 export const getCurrentAdmin = cache(async (): Promise<CurrentAdmin | null> => {
@@ -57,7 +57,7 @@ export const getCurrentAdmin = cache(async (): Promise<CurrentAdmin | null> => {
   if (!token || token.length > 128) return null;
   const session = await prisma.adminSession.findUnique({
     where: { tokenHash: hashToken(token) },
-    include: { adminUser: { select: { id: true, email: true, name: true } } },
+    include: { adminUser: { select: { id: true, email: true, name: true, merchantId: true } } },
   });
   if (!session || session.expiresAt < new Date()) return null;
   return session.adminUser;

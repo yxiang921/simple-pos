@@ -7,17 +7,19 @@ import { BASE_UNIT_LABEL, formatDateTime, type BaseUnitCode } from "@/lib/format
 import { PageHeader } from "@/components/ui/misc";
 import { MenuItemForm } from "../../menu-item-form";
 import { loadFormOptions } from "../../form-data";
+import { requireContext } from "@/lib/tenant";
 
 export const metadata: Metadata = { title: "Edit menu item" };
 
 export default async function EditMenuItemPage({ params }: PageProps<"/admin/menu/[id]/edit">) {
   const { id } = await params;
+  const ctx = await requireContext();
   const [item, options] = await Promise.all([
-    prisma.menuItem.findUnique({
-      where: { id },
+    prisma.menuItem.findFirst({
+      where: { id, merchantId: ctx.merchant.id },
       include: { recipe: { include: { ingredient: { select: { unit: true, name: true } } }, orderBy: { ingredient: { name: "asc" } } } },
     }),
-    loadFormOptions(),
+    loadFormOptions(ctx),
   ]);
   if (!item || item.isArchived) notFound();
 
@@ -31,6 +33,7 @@ export default async function EditMenuItemPage({ params }: PageProps<"/admin/men
         id={item.id}
         categories={options.categories}
         ingredients={options.ingredients}
+        stockLabel={options.stockLabel}
         initial={{
           name: item.name,
           description: item.description,

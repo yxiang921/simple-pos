@@ -4,7 +4,7 @@ import { z } from "zod";
 import { createOrder } from "@/lib/services/orders";
 import { DomainError, InsufficientStockError } from "@/lib/errors";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
-import { createOrderSchema, fieldErrors, firstError } from "@/lib/validation";
+import { createOrderSchema, fieldErrors, firstError, idString } from "@/lib/validation";
 
 export type SubmitOrderResult =
   | { ok: true; orderId: string }
@@ -17,11 +17,14 @@ export type SubmitOrderResult =
     };
 
 /**
- * Guest checkout. The client sends only menu item ids + quantities and an
- * idempotency key; prices, totals and stock are resolved on the server.
+ * Guest checkout at one branch. The client sends only the branch id, menu item
+ * ids + quantities and an idempotency key; prices, totals and stock are
+ * resolved on the server (menu items must belong to the branch's merchant).
  */
-export async function submitOrderAction(payload: unknown): Promise<SubmitOrderResult> {
+export async function submitOrderAction(branchId: string, payload: unknown): Promise<SubmitOrderResult> {
+  const branch = idString.safeParse(branchId);
   const parsed = createOrderSchema.safeParse(payload);
+  if (!branch.success) return { ok: false, error: "Unknown outlet." };
   if (!parsed.success) {
     return { ok: false, error: firstError(parsed.error), fieldErrors: fieldErrors(parsed.error) };
   }
@@ -35,7 +38,7 @@ export async function submitOrderAction(payload: unknown): Promise<SubmitOrderRe
   }
 
   try {
-    const order = await createOrder(parsed.data);
+    const order = await createOrder(branch.data, parsed.data);
     return { ok: true, orderId: order.id };
   } catch (err) {
     if (err instanceof InsufficientStockError) {

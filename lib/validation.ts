@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RESERVED_SLUGS, SLUG_RE } from "@/lib/slug";
 import { FLOOR_KINDS, normalizeTableNumber } from "./floor";
 
 // Decimal strings are validated by regex and kept as strings so they can be
@@ -31,6 +32,42 @@ export const loginSchema = z.object({
   email: z.email("Enter a valid email").trim().toLowerCase().max(254),
   password: z.string().min(1, "Password is required").max(200),
 });
+
+const slugField = (label: string) =>
+  trimmed(40)
+    .toLowerCase()
+    .min(2, `${label} needs at least 2 characters`)
+    .regex(SLUG_RE, "Use lowercase letters, numbers and dashes; start and end with a letter or number");
+
+export const branchSchema = z.object({
+  name: trimmed(60).min(1, "Branch name is required"),
+  slug: slugField("URL name"),
+  address: trimmed(200).default(""),
+  isActive: z.boolean().optional(),
+});
+export type BranchFormInput = z.input<typeof branchSchema>;
+
+/** Merchant sign-up: the business, its owner account and (optionally) branches. */
+export const registerSchema = z
+  .object({
+    businessName: trimmed(80).min(2, "Business name is required"),
+    slug: slugField("Shop URL").refine((v) => !RESERVED_SLUGS.has(v), "This URL name is reserved"),
+    ownerName: trimmed(80).min(1, "Your name is required"),
+    email: z.email("Enter a valid email").trim().toLowerCase().max(254),
+    password: z.string().min(10, "Use at least 10 characters").max(200),
+    hasBranches: checkbox,
+    /** One branch name per line (besides headquarters). */
+    branchNames: trimmed(2000).default(""),
+    sampleData: checkbox,
+  })
+  .transform((v) => ({
+    ...v,
+    branches: v.hasBranches
+      ? [...new Set(v.branchNames.split(/\r?\n/).map((n) => n.trim()).filter(Boolean))].slice(0, 20)
+      : [],
+  }))
+  .refine((v) => !v.hasBranches || v.branches.length > 0, { path: ["branchNames"], message: "Add at least one branch, one per line" })
+  .refine((v) => v.branches.every((n) => n.length <= 60), { path: ["branchNames"], message: "Branch names can be up to 60 characters" });
 
 export const changePasswordSchema = z
   .object({

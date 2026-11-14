@@ -7,7 +7,7 @@ import { createOrder } from "@/lib/services/orders";
 import { getPrepSheet, savePrep } from "@/lib/services/prep";
 import { dayRangeUtc, localDate, zonedTimeToUtc } from "@/lib/time";
 import { dailyPrepSchema, storeSettingsSchema } from "@/lib/validation";
-import { orderInput, resetDb, seedBurgerScenario } from "./helpers";
+import { addBranch, orderInput, resetDb, seedBurgerScenario, T } from "./helpers";
 
 beforeEach(resetDb);
 afterAll(() => prisma.$disconnect());
@@ -15,13 +15,24 @@ afterAll(() => prisma.$disconnect());
 describe("sold-out events", () => {
   it("records one event when an item is switched off, none when switched on or repeated", async () => {
     const s = await seedBurgerScenario();
-    await setMenuItemAvailability(s.burger.id, false);
-    await setMenuItemAvailability(s.burger.id, false); // double click
-    await setMenuItemAvailability(s.burger.id, true);
+    await setMenuItemAvailability(T.merchantId, s.burger.id, false, T.branchId);
+    await setMenuItemAvailability(T.merchantId, s.burger.id, false, T.branchId); // double click
+    await setMenuItemAvailability(T.merchantId, s.burger.id, true, T.branchId);
     expect(await prisma.soldOutEvent.count({ where: { menuItemId: s.burger.id } })).toBe(1);
 
-    await Promise.all([1, 2, 3].map(() => setMenuItemAvailability(s.burger.id, false))); // concurrent clicks
+    await Promise.all([1, 2, 3].map(() => setMenuItemAvailability(T.merchantId, s.burger.id, false, T.branchId))); // concurrent clicks
     expect(await prisma.soldOutEvent.count({ where: { menuItemId: s.burger.id } })).toBe(2);
+  });
+
+  it("switching an item off for all branches records an event at each branch still selling it", async () => {
+    const s = await seedBurgerScenario();
+    const a = await addBranch("a");
+    await addBranch("b");
+    await setMenuItemAvailability(T.merchantId, s.burger.id, false, a.id); // already off at "a"
+    await setMenuItemAvailability(T.merchantId, s.burger.id, false); // shared switch
+    expect(await prisma.soldOutEvent.count({ where: { branchId: a.id } })).toBe(1);
+    expect(await prisma.soldOutEvent.count()).toBe(3); // a (earlier) + HQ + b
+    expect((await prisma.menuItem.findUniqueOrThrow({ where: { id: s.burger.id } })).isAvailable).toBe(false);
   });
 
   it("records an event when the edit form turns availability off", async () => {
@@ -36,8 +47,8 @@ describe("sold-out events", () => {
       aliases: ["burger"],
       recipe: [],
     };
-    await saveMenuItem(s.burger.id, { ...base, isAvailable: false });
-    await saveMenuItem(s.burger.id, { ...base, isAvailable: false }); // already off → no new event
+    await saveMenuItem(T.merchantId, s.burger.id, { ...base, isAvailable: false });
+    await saveMenuItem(T.merchantId, s.burger.id, { ...base, isAvailable: false }); // already off → no new event
     expect(await prisma.soldOutEvent.count()).toBe(1);
     const item = await prisma.menuItem.findUniqueOrThrow({ where: { id: s.burger.id } });
     expect(item.isPreparedAhead).toBe(false);
@@ -46,8 +57,8 @@ describe("sold-out events", () => {
 
   it("archives (not deletes) items that have sold-out or prep history", async () => {
     const s = await seedBurgerScenario();
-    await setMenuItemAvailability(s.burger.id, false);
-    expect(await deleteMenuItem(s.burger.id)).toBe("archived");
+    await setMenuItemAvailability(T.merchantId, s.burger.id, false);
+    expect(await deleteMenuItem(T.merchantId, s.burger.id)).toBe("archived");
   });
 });
 
@@ -55,18 +66,18 @@ describe("daily prep", () => {
   it("upserts plates, removes blank entries, and reports sold vs prepared", async () => {
     const s = await seedBurgerScenario();
     const today = localDate(new Date());
-    await savePrep(today, [{ menuItemId: s.burger.id, plates: 10 }]);
-    await savePrep(today, [{ menuItemId: s.burger.id, plates: 12 }]);
+    await savePrep(T.branchId, today, [{ menuItemId: s.burger.id, plates: 10 }]);
+    await savePrep(T.branchId, today, [{ menuItemId: s.burger.id, plates: 12 }]);
     expect(await prisma.dailyPrep.count()).toBe(1);
 
-    await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 3 }]));
-    let sheet = await getPrepSheet(today);
+    await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 3 }]));
+    let sheet = await getPrepSheet(T.branchId, today);
     let row = sheet.rows.find((r) => r.menuItemId === s.burger.id)!;
     expect(row.platesPrepared).toBe(12);
     expect(row.sold).toBe(3);
 
-    await savePrep(today, [{ menuItemId: s.burger.id, plates: null }]);
-    sheet = await getPrepSheet(today);
+    await savePrep(T.branchId, today, [{ menuItemId: s.burger.id, plates: null }]);
+    sheet = await getPrepSheet(T.branchId, today);
     row = sheet.rows.find((r) => r.menuItemId === s.burger.id)!;
     expect(row.platesPrepared).toBeNull();
     expect(await prisma.dailyPrep.count()).toBe(0);
@@ -74,7 +85,7 @@ describe("daily prep", () => {
 
   it("stores the Malaysian calendar date in a DATE column", async () => {
     const s = await seedBurgerScenario();
-    await savePrep("2026-11-14", [{ menuItemId: s.burger.id, plates: 5 }]);
+    await savePrep(T.branchId, "2026-11-14", [{ menuItemId: s.burger.id, plates: 5 }]);
     const [row] = await prisma.$queryRawUnsafe<{ d: string }[]>(
       `SELECT date::text AS d FROM "${dbSchema()}"."daily_prep"`,
     );
@@ -92,7 +103,7 @@ describe("daily prep", () => {
 
 describe("ingredient cost", () => {
   it("stores RM per base unit (RM 11/kg → 0.011 per g) and null when unknown", async () => {
-    const chicken = await createIngredient({
+    const chicken = await createIngredient(T.merchantId, T.branchId, {
       name: "Chicken",
       sku: null,
       unit: "G",
@@ -103,10 +114,10 @@ describe("ingredient cost", () => {
     });
     expect(chicken!.costPerUnit!.toString()).toBe("0.011");
 
-    const egg = await createIngredient({ name: "Egg", sku: null, unit: "PCS", initialStock: "0", lowStockThreshold: "0", cost: null });
+    const egg = await createIngredient(T.merchantId, T.branchId, { name: "Egg", sku: null, unit: "PCS", initialStock: "0", lowStockThreshold: "0", cost: null });
     expect(egg!.costPerUnit).toBeNull();
 
-    await updateIngredient({
+    await updateIngredient(T.merchantId, null, {
       id: chicken!.id,
       name: "Chicken",
       sku: null,
@@ -121,7 +132,7 @@ describe("ingredient cost", () => {
 
   it("rejects a cost unit that doesn't match the ingredient", async () => {
     await expect(
-      createIngredient({ name: "Milk", sku: null, unit: "ML", initialStock: "0", lowStockThreshold: "0", cost: "5", costUnit: "kg" }),
+      createIngredient(T.merchantId, T.branchId, { name: "Milk", sku: null, unit: "ML", initialStock: "0", lowStockThreshold: "0", cost: "5", costUnit: "kg" }),
     ).rejects.toThrow(/doesn't match/);
   });
 });

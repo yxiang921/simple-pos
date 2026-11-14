@@ -13,13 +13,16 @@ export type FloorData = {
   serverNow: string;
 };
 
-/** Floor plan + every open (not completed / cancelled) real order, for the live floor view. */
-export async function getFloorData(): Promise<FloorData> {
+/**
+ * The merchant's floor plan (shared by its branches) + every open (not completed
+ * / cancelled) real order of one branch, for the live floor view.
+ */
+export async function getFloorData(merchantId: string, branchId: string): Promise<FloorData> {
   const [settings, objects, orders] = await Promise.all([
-    prisma.storeSetting.findUnique({ where: { id: 1 } }),
-    prisma.floorObject.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
+    prisma.storeSetting.findUnique({ where: { merchantId } }),
+    prisma.floorObject.findMany({ where: { merchantId }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
     prisma.order.findMany({
-      where: { status: { in: OPEN_ORDER_STATUSES }, isSimulated: false },
+      where: { branchId, branch: { merchantId }, status: { in: OPEN_ORDER_STATUSES }, isSimulated: false },
       orderBy: { createdAt: "asc" },
       take: 500,
       include: { items: { select: { menuItemNameSnapshot: true, quantity: true }, orderBy: { menuItemNameSnapshot: "asc" } } },
@@ -58,19 +61,22 @@ export async function getFloorData(): Promise<FloorData> {
 }
 
 /** Replace the whole floor plan (nothing references floor objects, so this is safe). */
-export async function saveFloorLayout(input: FloorLayoutInput) {
+export async function saveFloorLayout(merchantId: string, input: FloorLayoutInput) {
   return prisma.$transaction(async (tx) => {
+    const merchant = await tx.merchant.findUniqueOrThrow({ where: { id: merchantId }, select: { name: true } });
     await tx.storeSetting.upsert({
-      where: { id: 1 },
-      create: { id: 1, floorWidth: input.floorWidth, floorDepth: input.floorDepth },
+      where: { merchantId },
+      create: { merchantId, storeName: merchant.name, floorWidth: input.floorWidth, floorDepth: input.floorDepth },
       update: { floorWidth: input.floorWidth, floorDepth: input.floorDepth },
     });
-    await tx.floorObject.deleteMany({});
+    const own = new Set((await tx.floorObject.findMany({ where: { merchantId }, select: { id: true } })).map((o) => o.id));
+    await tx.floorObject.deleteMany({ where: { merchantId } });
     if (input.objects.length) {
       await tx.floorObject.createMany({
         data: input.objects.map((o, i) => ({
-          // Keep ids of existing objects; new ones (temporary "new-…" ids) get a fresh id.
-          ...(o.id && !o.id.startsWith("new-") ? { id: o.id } : {}),
+          merchantId,
+          // Keep ids of this merchant's existing objects; new ones (temporary "new-…" ids) get a fresh id.
+          ...(o.id && own.has(o.id) ? { id: o.id } : {}),
           kind: o.kind,
           label: o.label,
           tableNumber: o.kind === "TABLE" ? normalizeTableNumber(o.tableNumber) : null,
@@ -90,10 +96,10 @@ export async function saveFloorLayout(input: FloorLayoutInput) {
 }
 
 /** Create the sample café layout. Refuses to overwrite an existing layout unless `replace`. */
-export async function createSampleLayout(opts: { replace?: boolean } = {}) {
-  const existing = await prisma.floorObject.count();
+export async function createSampleLayout(merchantId: string, opts: { replace?: boolean } = {}) {
+  const existing = await prisma.floorObject.count({ where: { merchantId } });
   if (existing && !opts.replace) throw new DomainError("A floor plan already exists.");
-  return saveFloorLayout({
+  return saveFloorLayout(merchantId, {
     floorWidth: SAMPLE_FLOOR.width,
     floorDepth: SAMPLE_FLOOR.depth,
     objects: SAMPLE_LAYOUT.map((o) => ({ ...o, seats: o.seats ?? undefined })),
@@ -105,9 +111,9 @@ const round = (v: number) => Math.round(v * 1000) / 1000;
 export type TableOption = { tableNumber: string; label: string; seats: number | null };
 
 /** Tables on the floor plan, in natural order (1, 2, … 10, A1 …). */
-export async function listTables(): Promise<TableOption[]> {
+export async function listTables(merchantId: string): Promise<TableOption[]> {
   const rows = await prisma.floorObject.findMany({
-    where: { kind: "TABLE", tableNumber: { not: null } },
+    where: { merchantId, kind: "TABLE", tableNumber: { not: null } },
     select: { tableNumber: true, label: true, seats: true },
   });
   return rows
@@ -119,9 +125,12 @@ export async function listTables(): Promise<TableOption[]> {
  * Raw table_number values on orders that mean the given table (orders may hold
  * "T05", "5", "Table 5"…). Used to filter the Orders list by table.
  */
-export async function tableNumberVariants(table: string): Promise<string[]> {
+export async function tableNumberVariants(
+  scope: { branchId: string } | { branch: { merchantId: string } },
+  table: string,
+): Promise<string[]> {
   const key = normalizeTableNumber(table);
   if (!key) return [];
-  const rows = await prisma.order.groupBy({ by: ["tableNumber"], where: { tableNumber: { not: null } } });
+  const rows = await prisma.order.groupBy({ by: ["tableNumber"], where: { ...scope, tableNumber: { not: null } } });
   return rows.map((r) => r.tableNumber!).filter((v) => normalizeTableNumber(v) === key);
 }

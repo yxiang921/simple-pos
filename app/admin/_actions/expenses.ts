@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/auth/session";
+import { requireContext } from "@/lib/tenant";
 import { runAction } from "@/lib/action-utils";
 import { changeExpenseAmount, createExpense, deleteExpense, updateExpense } from "@/lib/services/expenses";
 import { expenseChangeSchema, expenseSchema, idString } from "@/lib/validation";
@@ -9,28 +9,28 @@ import { expenseChangeSchema, expenseSchema, idString } from "@/lib/validation";
 const revalidate = () => revalidatePath("/admin/costs");
 
 export async function saveExpenseAction(id: string | null, payload: unknown) {
-  await requireAdmin();
+  const ctx = await requireContext();
   return runAction(async () => {
     const input = expenseSchema.parse(payload);
-    if (id) await updateExpense(idString.parse(id), input);
-    else await createExpense(input);
+    if (id) await updateExpense(ctx.merchant.id, idString.parse(id), input);
+    else await createExpense(ctx.merchant.id, input);
     revalidate();
   });
 }
 
 export async function changeExpenseAmountAction(payload: unknown) {
-  await requireAdmin();
+  const ctx = await requireContext();
   return runAction(async () => {
     const input = expenseChangeSchema.parse(payload);
-    await changeExpenseAmount(input.id, input.amount, input.effectiveFrom);
+    await changeExpenseAmount(ctx.merchant.id, input.id, input.amount, input.effectiveFrom);
     revalidate();
   });
 }
 
 export async function deleteExpenseAction(id: string) {
-  await requireAdmin();
+  const ctx = await requireContext();
   return runAction(async () => {
-    await deleteExpense(idString.parse(id));
+    await deleteExpense(ctx.merchant.id, idString.parse(id));
     revalidate();
   });
 }

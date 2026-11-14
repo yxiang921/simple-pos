@@ -4,7 +4,8 @@ import { clsx } from "clsx";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { monthlyEquivalent, monthSummary } from "@/lib/services/expenses";
-import { DEFAULT_TZ, localDate } from "@/lib/time";
+import { localDate } from "@/lib/time";
+import { requireContext } from "@/lib/tenant";
 import { formatRM } from "@/lib/format";
 import {
   EXPENSE_CATEGORY_SHORT,
@@ -29,8 +30,9 @@ const shortDate = (s: string) =>
 
 export default async function CostsPage({ searchParams }: PageProps<"/admin/costs">) {
   const sp = await searchParams;
-  const settings = await prisma.storeSetting.findUnique({ where: { id: 1 }, select: { timezone: true } });
-  const tz = settings?.timezone || DEFAULT_TZ;
+  const ctx = await requireContext();
+  const tz = ctx.settings.timezone;
+  const multi = ctx.branches.length > 1;
   const today = localDate(new Date(), tz);
   const thisMonth = today.slice(0, 7);
   const month = typeof sp.month === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(sp.month) ? sp.month : thisMonth;
@@ -38,8 +40,8 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
   const includeSim = sp.sim !== "exclude";
 
   const [summary, expenses] = await Promise.all([
-    monthSummary(month, tz, includeSim),
-    prisma.expense.findMany({ orderBy: [{ category: "asc" }, { name: "asc" }, { startDate: "desc" }] }),
+    monthSummary(ctx.merchant.id, month, tz, includeSim, ctx.branch?.id ?? null),
+    prisma.expense.findMany({ where: { merchantId: ctx.merchant.id }, orderBy: [{ category: "asc" }, { name: "asc" }, { startDate: "desc" }] }),
   ]);
 
   const q = (params: Record<string, string | undefined>) => {
@@ -84,6 +86,7 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
     new Date(`${month}-01T00:00:00Z`),
   );
   const net = summary.netProfit;
+  const branchView = multi && Boolean(ctx.branch);
   const tiles = [
     { label: "Sales", value: formatRM(summary.revenue.toFixed(2)), sub: `${summary.orders} orders` },
     {
@@ -96,20 +99,37 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
           : "At current ingredient costs",
       warn: summary.uncostedIngredients > 0,
     },
-    { label: "Overheads", value: formatRM(summary.overheads.toFixed(2)), sub: `${formatRM(summary.overheadPerDay.toFixed(2))} per day` },
     {
-      label: "Estimated profit",
-      value: formatRM(net.toFixed(2)),
-      sub: summary.breakEvenPerDay ? `Break-even: ${formatRM(summary.breakEvenPerDay.toFixed(2))} sales/day` : "Sales − ingredients − overheads",
-      danger: net.lt(0),
+      label: branchView ? "Overheads (whole business)" : "Overheads",
+      value: formatRM(summary.overheads.toFixed(2)),
+      sub: `${formatRM(summary.overheadPerDay.toFixed(2))} per day`,
     },
+    branchView
+      ? {
+          label: "Gross profit (this branch)",
+          value: formatRM(summary.grossProfit.toFixed(2)),
+          sub: "Sales − ingredients; shared running costs are in All branches",
+          danger: summary.grossProfit.lt(0),
+        }
+      : {
+          label: "Estimated profit",
+          value: formatRM(net.toFixed(2)),
+          sub: summary.breakEvenPerDay ? `Break-even: ${formatRM(summary.breakEvenPerDay.toFixed(2))} sales/day` : "Sales − ingredients − overheads",
+          danger: net.lt(0),
+        },
   ];
 
   return (
     <>
       <PageHeader
         title="Costs"
-        description="Running costs such as rent, utilities and salaries, and an estimated monthly profit."
+        description={
+          multi
+            ? ctx.branch
+              ? `Sales and ingredient cost of ${ctx.branch.name}; running costs are the whole business's (shared by all branches).`
+              : "Sales of all branches, the business's running costs (rent, utilities, salaries) and an estimated monthly profit."
+            : "Running costs such as rent, utilities and salaries, and an estimated monthly profit."
+        }
         actions={<ExpenseToolbar today={today} />}
       />
 
@@ -210,6 +230,31 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
           )}
         </Panel>
 
+        <div className="space-y-5">
+        {multi && (
+          <Panel>
+            <PanelHeader title={`Sales by branch · ${monthLabel}`} />
+            <ul className="divide-y divide-line">
+              {ctx.branches.map((b) => {
+                const r = summary.salesByBranch.get(b.id);
+                const total = [...summary.salesByBranch.values()].reduce((s, x) => s + Number(x.revenue), 0);
+                const share = total > 0 && r ? Number(r.revenue) / total : 0;
+                return (
+                  <li key={b.id} className={clsx("flex items-center justify-between gap-3 px-4 py-2.5 text-[13px]", ctx.branch?.id === b.id && "bg-primary-soft")}>
+                    <span className="min-w-0 truncate">
+                      {b.name}
+                      <span className="ml-1.5 text-[12px] text-muted">{(r?.orders ?? 0).toLocaleString()} orders</span>
+                    </span>
+                    <span className="tabular whitespace-nowrap">
+                      {formatRM((r?.revenue ?? 0).toFixed(2))}
+                      <span className="ml-2 inline-block w-10 text-right text-[12px] text-muted">{Math.round(share * 100)}%</span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </Panel>
+        )}
         <Panel>
           <PanelHeader title={`Overheads · ${monthLabel}`} />
           {summary.overheadsByCategory.size === 0 ? (
@@ -240,6 +285,7 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
             the quantities each order used × the current cost per unit.
           </p>
         </Panel>
+        </div>
       </div>
     </>
   );

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { clsx } from "clsx";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { prisma } from "@/lib/db";
+import { branchFilter, requireContext } from "@/lib/tenant";
 import { formatDateTime, formatOrderNumber, formatQty, MOVEMENT_TYPE_LABEL, type BaseUnitCode } from "@/lib/format";
 import { Select } from "@/components/ui/form";
 import { buttonClass } from "@/components/ui/button";
@@ -22,11 +23,13 @@ const TYPE_TONE: Record<string, "neutral" | "green" | "warning" | "danger" | "ou
 
 export default async function MovementsPage({ searchParams }: PageProps<"/admin/inventory/movements">) {
   const sp = await searchParams;
+  const ctx = await requireContext();
+  const overview = !ctx.branch;
   const ingredientId = typeof sp.ingredient === "string" ? sp.ingredient : "";
   const type = typeof sp.type === "string" && (TYPES as readonly string[]).includes(sp.type) ? (sp.type as (typeof TYPES)[number]) : "";
   const { page, size } = readPaging(sp, 50);
 
-  const where: Prisma.InventoryMovementWhereInput = {};
+  const where: Prisma.InventoryMovementWhereInput = { ...branchFilter(ctx) };
   if (ingredientId) where.ingredientId = ingredientId;
   if (type) where.movementType = type;
 
@@ -39,10 +42,11 @@ export default async function MovementsPage({ searchParams }: PageProps<"/admin/
       include: {
         ingredient: { select: { name: true, unit: true } },
         order: { select: { orderNumber: true } },
+        branch: { select: { name: true } },
       },
     }),
     prisma.inventoryMovement.count({ where }),
-    prisma.ingredient.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    prisma.ingredient.findMany({ where: { merchantId: ctx.merchant.id }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
   const href = ({ page: p = 1, size: z = size }: { page?: number; size?: number }) => {
     const u = new URLSearchParams();
@@ -55,7 +59,14 @@ export default async function MovementsPage({ searchParams }: PageProps<"/admin/
 
   return (
     <>
-      <PageHeader title="Stock movements" description="Every change to ingredient stock, with the resulting balance." />
+      <PageHeader
+        title="Stock movements"
+        description={
+          overview
+            ? "Every change to ingredient stock at every branch, with the resulting branch balance."
+            : `Every change to ingredient stock${ctx.branches.length > 1 ? ` at ${ctx.branch!.name}` : ""}, with the resulting balance.`
+        }
+      />
 
       <form className="mb-3 flex flex-wrap gap-2" action="/admin/inventory/movements">
         <Select name="ingredient" defaultValue={ingredientId} className="h-8 w-56" aria-label="Ingredient">
@@ -92,6 +103,7 @@ export default async function MovementsPage({ searchParams }: PageProps<"/admin/
             <THead>
               <tr>
                 <TH>Time</TH>
+                {overview && <TH>Branch</TH>}
                 <TH>Ingredient</TH>
                 <TH>Type</TH>
                 <TH className="text-right">Change</TH>
@@ -108,6 +120,7 @@ export default async function MovementsPage({ searchParams }: PageProps<"/admin/
                 return (
                   <TR key={m.id}>
                     <TD className="tabular whitespace-nowrap text-muted">{formatDateTime(m.createdAt)}</TD>
+                    {overview && <TD className="whitespace-nowrap text-muted">{m.branch.name}</TD>}
                     <TD className="font-medium">
                       <Link href={`/admin/inventory/movements?ingredient=${m.ingredientId}`} className="hover:underline">
                         {m.ingredient.name}

@@ -1,5 +1,6 @@
 import { Prisma } from "@/lib/generated/prisma/client";
-import { prisma } from "@/lib/db";
+import { randomUUID } from "node:crypto";
+import { prisma, table, type TxClient } from "@/lib/db";
 import { DomainError, isUniqueViolation } from "@/lib/errors";
 import { toBaseUnit, type InputUnit } from "@/lib/units";
 
@@ -17,14 +18,17 @@ export type MenuItemInput = {
   recipe: { ingredientId: string; quantity: string; inputUnit: InputUnit }[];
 };
 
-/** Create (id = null) or update a menu item and replace its recipe atomically. */
-export async function saveMenuItem(id: string | null, input: MenuItemInput) {
+/**
+ * Create (id = null) or update one of the merchant's menu items (shared by all
+ * branches) and replace its recipe atomically.
+ */
+export async function saveMenuItem(merchantId: string, id: string | null, input: MenuItemInput) {
   return prisma.$transaction(async (tx) => {
-    const category = await tx.category.findUnique({ where: { id: input.categoryId } });
+    const category = await tx.category.findFirst({ where: { id: input.categoryId, merchantId } });
     if (!category) throw new DomainError("Selected category does not exist.");
 
     const ingredientIds = input.recipe.map((r) => r.ingredientId);
-    const ingredients = await tx.ingredient.findMany({ where: { id: { in: ingredientIds } } });
+    const ingredients = await tx.ingredient.findMany({ where: { id: { in: ingredientIds }, merchantId } });
     const byId = new Map(ingredients.map((i) => [i.id, i]));
 
     const recipe = input.recipe.map((line) => {
@@ -49,17 +53,15 @@ export async function saveMenuItem(id: string | null, input: MenuItemInput) {
 
     let itemId: string;
     if (id) {
-      const existing = await tx.menuItem.findUnique({ where: { id } });
+      const existing = await tx.menuItem.findFirst({ where: { id, merchantId } });
       if (!existing || existing.isArchived) throw new DomainError("Menu item not found.", "NOT_FOUND");
       await tx.menuItem.update({ where: { id }, data });
       // Switching an item off records when it sold out (demand-planning signal).
-      if (existing.isAvailable && !input.isAvailable) {
-        await tx.soldOutEvent.create({ data: { menuItemId: id } });
-      }
+      if (existing.isAvailable && !input.isAvailable) await recordSoldOut(tx, merchantId, id, null);
       await tx.menuItemIngredient.deleteMany({ where: { menuItemId: id } });
       itemId = id;
     } else {
-      itemId = (await tx.menuItem.create({ data, select: { id: true } })).id;
+      itemId = (await tx.menuItem.create({ data: { merchantId, ...data }, select: { id: true } })).id;
     }
     if (recipe.length) {
       await tx.menuItemIngredient.createMany({
@@ -70,8 +72,27 @@ export async function saveMenuItem(id: string | null, input: MenuItemInput) {
   });
 }
 
+/**
+ * Record a sold-out event for one branch, or (branchId null) for every active
+ * branch where the item was still on sale.
+ */
+async function recordSoldOut(tx: TxClient, merchantId: string, menuItemId: string, branchId: string | null) {
+  if (branchId) {
+    await tx.soldOutEvent.create({ data: { branchId, menuItemId } });
+    return;
+  }
+  const branches = await tx.branch.findMany({
+    where: { merchantId, isActive: true, NOT: { menuStatus: { some: { menuItemId, isAvailable: false } } } },
+    select: { id: true },
+  });
+  if (branches.length) await tx.soldOutEvent.createMany({ data: branches.map((b) => ({ branchId: b.id, menuItemId })) });
+}
+
 /** Hard-delete items with no history; archive (soft delete) items with orders, prep or sold-out records. */
-export async function deleteMenuItem(id: string): Promise<"deleted" | "archived"> {
+export async function deleteMenuItem(merchantId: string, id: string): Promise<"deleted" | "archived"> {
+  if (!(await prisma.menuItem.findFirst({ where: { id, merchantId }, select: { id: true } }))) {
+    throw new DomainError("Menu item not found.", "NOT_FOUND");
+  }
   const [orders, preps, soldOuts] = await Promise.all([
     prisma.orderItem.count({ where: { menuItemId: id } }),
     prisma.dailyPrep.count({ where: { menuItemId: id } }),
@@ -86,37 +107,57 @@ export async function deleteMenuItem(id: string): Promise<"deleted" | "archived"
 }
 
 /**
- * Toggle availability. Turning an item OFF records a sold_out_events row in the
- * same transaction. The conditional update makes repeated clicks record only once.
+ * Toggle availability at one branch (branchId), or on the shared menu for all
+ * branches (branchId null). Turning an item OFF records sold_out_events rows in
+ * the same transaction; repeated clicks record only once.
  */
-export async function setMenuItemAvailability(id: string, isAvailable: boolean) {
+export async function setMenuItemAvailability(merchantId: string, id: string, isAvailable: boolean, branchId: string | null = null) {
   await prisma.$transaction(async (tx) => {
-    const res = await tx.menuItem.updateMany({
-      where: { id, isAvailable: !isAvailable, isArchived: false },
+    const item = await tx.menuItem.findFirst({ where: { id, merchantId }, select: { id: true, isArchived: true } });
+    if (!item) throw new DomainError("Menu item not found.", "NOT_FOUND");
+    if (item.isArchived) return;
+
+    if (!branchId) {
+      const res = await tx.menuItem.updateMany({ where: { id, isAvailable: !isAvailable }, data: { isAvailable } });
+      if (res.count && !isAvailable) await recordSoldOut(tx, merchantId, id, null);
+      return;
+    }
+
+    const branch = await tx.branch.findFirst({ where: { id: branchId, merchantId }, select: { id: true } });
+    if (!branch) throw new DomainError("Branch not found.", "NOT_FOUND");
+    // Lock the (branch, item) row so two clicks can't both record a sold-out event.
+    await tx.$executeRaw`
+      INSERT INTO ${table("branch_menu_items")} (id, branch_id, menu_item_id, is_available, updated_at)
+      VALUES (${randomUUID()}, ${branchId}, ${id}, true, now())
+      ON CONFLICT (branch_id, menu_item_id) DO NOTHING`;
+    const res = await tx.branchMenuItem.updateMany({
+      where: { branchId, menuItemId: id, isAvailable: !isAvailable },
       data: { isAvailable },
     });
-    if (res.count === 0) {
-      const exists = await tx.menuItem.findUnique({ where: { id }, select: { id: true } });
-      if (!exists) throw new DomainError("Menu item not found.", "NOT_FOUND");
-      return; // already in the requested state
-    }
-    if (!isAvailable) await tx.soldOutEvent.create({ data: { menuItemId: id } });
+    if (res.count && !isAvailable) await recordSoldOut(tx, merchantId, id, branchId);
   });
 }
 
 // ─── Categories ────────────────────────────────────────────────────────
 
-export async function saveCategory(id: string | null, input: { name: string; sortOrder: number; isActive: boolean }) {
+export async function saveCategory(merchantId: string, id: string | null, input: { name: string; sortOrder: number; isActive: boolean }) {
   try {
-    if (id) return await prisma.category.update({ where: { id }, data: input });
-    return await prisma.category.create({ data: input });
+    if (id) {
+      const res = await prisma.category.updateMany({ where: { id, merchantId }, data: input });
+      if (!res.count) throw new DomainError("Category not found.", "NOT_FOUND");
+      return await prisma.category.findUniqueOrThrow({ where: { id } });
+    }
+    return await prisma.category.create({ data: { merchantId, ...input } });
   } catch (err) {
     if (isUniqueViolation(err)) throw new DomainError("A category with this name already exists.");
     throw err;
   }
 }
 
-export async function deleteCategory(id: string) {
+export async function deleteCategory(merchantId: string, id: string) {
+  if (!(await prisma.category.findFirst({ where: { id, merchantId }, select: { id: true } }))) {
+    throw new DomainError("Category not found.", "NOT_FOUND");
+  }
   const count = await prisma.menuItem.count({ where: { categoryId: id } });
   if (count > 0) {
     throw new DomainError(
@@ -158,19 +199,24 @@ export function computeMaxServings(
   return Math.max(0, Math.min(max, 999));
 }
 
-export async function getGuestMenu(): Promise<GuestMenu> {
+/** The shared menu as one branch sells it: its availability and servings from its own stock. */
+export async function getGuestMenu(branchId: string): Promise<GuestMenu> {
+  const branch = await prisma.branch.findUnique({ where: { id: branchId }, select: { merchantId: true } });
+  if (!branch) return { categories: [], items: [] };
   const categories = await prisma.category.findMany({
-    where: { isActive: true },
+    where: { merchantId: branch.merchantId, isActive: true },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     include: {
       menuItems: {
-        where: { isArchived: false, isAvailable: true },
+        where: { isArchived: false, isAvailable: true, NOT: { branchStatus: { some: { branchId, isAvailable: false } } } },
         orderBy: { name: "asc" },
         include: {
           recipe: {
             select: {
               quantityRequired: true,
-              ingredient: { select: { currentStock: true, isActive: true } },
+              ingredient: {
+                select: { isActive: true, stocks: { where: { branchId }, select: { currentStock: true } } },
+              },
             },
           },
         },
@@ -179,6 +225,7 @@ export async function getGuestMenu(): Promise<GuestMenu> {
   });
 
   const withItems = categories.filter((c) => c.menuItems.length > 0);
+  const zero = new D(0);
   return {
     categories: withItems.map((c) => ({ id: c.id, name: c.name })),
     items: withItems.flatMap((c) =>
@@ -189,7 +236,12 @@ export async function getGuestMenu(): Promise<GuestMenu> {
         price: m.price.toFixed(2),
         imageUrl: m.imageUrl,
         categoryId: c.id,
-        maxServings: computeMaxServings(m.recipe),
+        maxServings: computeMaxServings(
+          m.recipe.map((r) => ({
+            quantityRequired: r.quantityRequired,
+            ingredient: { isActive: r.ingredient.isActive, currentStock: r.ingredient.stocks[0]?.currentStock ?? zero },
+          })),
+        ),
       })),
     ),
   };

@@ -6,8 +6,8 @@ export default function NotFound() {
       <p className="text-[13px] font-medium text-muted">404</p>
       <h1 className="mt-1 text-[18px] font-semibold">Page not found</h1>
       <p className="mt-1 text-[13px] text-muted">The page or order you are looking for does not exist.</p>
-      <Link href="/order" className="mt-5 text-[14px] font-medium text-primary hover:underline">
-        Go to menu
+      <Link href="/" className="mt-5 text-[14px] font-medium text-primary hover:underline">
+        Go to the home page
       </Link>
     </main>
   );

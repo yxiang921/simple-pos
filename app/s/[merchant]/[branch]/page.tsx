@@ -1,11 +1,15 @@
+import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { getGuestMenu } from "@/lib/services/menu";
-import { prisma } from "@/lib/db";
+import { getGuestShop } from "@/lib/tenant";
 import { MenuBrowser } from "./menu-browser";
 
-export default async function GuestMenuPage() {
+export default async function GuestMenuPage({ params }: PageProps<"/s/[merchant]/[branch]">) {
   await connection();
-  const [menu, settings] = await Promise.all([getGuestMenu(), prisma.storeSetting.findUnique({ where: { id: 1 } })]);
+  const { merchant, branch } = await params;
+  const shop = await getGuestShop(merchant, branch);
+  if (!shop) notFound();
+  const menu = await getGuestMenu(shop.branch.id);
 
   if (menu.items.length === 0) {
     return (
@@ -15,5 +19,5 @@ export default async function GuestMenuPage() {
       </main>
     );
   }
-  return <MenuBrowser menu={menu} acceptingOrders={settings?.acceptingOrders ?? true} />;
+  return <MenuBrowser menu={menu} acceptingOrders={shop.settings.acceptingOrders} />;
 }

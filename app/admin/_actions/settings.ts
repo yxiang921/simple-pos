@@ -2,20 +2,21 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
+import { requireContext } from "@/lib/tenant";
 import { formObject, runAction } from "@/lib/action-utils";
 import type { ActionResult } from "@/lib/errors";
 import { storeSettingsSchema } from "@/lib/validation";
 
+/** Settings are shared by all branches of the merchant. */
 export async function saveSettingsAction(_prev: ActionResult | null, fd: FormData): Promise<ActionResult> {
-  await requireAdmin();
+  const ctx = await requireContext();
   return runAction(async () => {
     const input = storeSettingsSchema.parse(formObject(fd));
-    await prisma.storeSetting.upsert({
-      where: { id: 1 },
-      create: { id: 1, ...input },
-      update: input,
-    });
+    const merchantId = ctx.merchant.id;
+    await prisma.$transaction([
+      prisma.storeSetting.upsert({ where: { merchantId }, create: { merchantId, ...input }, update: input }),
+      prisma.merchant.update({ where: { id: merchantId }, data: { name: input.storeName } }),
+    ]);
     revalidatePath("/", "layout");
   });
 }

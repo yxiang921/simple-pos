@@ -4,6 +4,37 @@ BossBuddy reads the POS database **read-only**. All POS tables live in the schem
 
 Migration that added the fields below: `prisma/migrations/20261114000000_demand_planning` (additive only — nothing renamed or removed).
 
+## ⚠️ Multi-merchant change (migration `20261116000000_saas_multi_tenant`) — read this first
+
+The POS is now multi-merchant with branches. The existing Kopi & Co. data was moved into **one merchant** (`merchants.slug = 'kopi-co'`) with a **headquarters branch** (`branches.slug = 'hq'`); no rows were deleted. Queries written for the single-shop schema need these changes:
+
+| Before | Now |
+|---|---|
+| `ingredients.current_stock`, `ingredients.low_stock_threshold` | **Removed.** Stock is per branch: `ingredient_stocks (branch_id, ingredient_id, current_stock, low_stock_threshold)`. Total for a merchant = `sum(current_stock)` over its branches. |
+| `store_settings` single row `id = 1` | One row **per merchant**: `store_settings.merchant_id` (unique). `id` is now just a serial. |
+| `orders`, `inventory_movements`, `daily_prep`, `sold_out_events` were shop-wide | Each has **`branch_id` → `branches.id`** (NOT NULL). `daily_prep` is unique on `(branch_id, date, menu_item_id)`. |
+| `categories`, `menu_items`, `ingredients`, `expenses`, `floor_objects`, `admin_users` | Each has **`merchant_id` → `merchants.id`** (NOT NULL). Names / SKUs / table numbers are unique per merchant. |
+| `menu_items.is_available` = on/off | Still the on/off switch **for all branches**. Per branch: `branch_menu_items (branch_id, menu_item_id, is_available)`; no row = available. Effective = both true. |
+| NOTIFY payload `{schema, table, op}` | `{schema, table, op, m, b}` — merchant id / branch id of the rows changed (either may be null). |
+
+Always filter by merchant (and branch when relevant). To keep reading only Kopi & Co. headquarters as before:
+
+```sql
+-- the old single shop = merchant kopi-co, branch hq
+with hq as (
+  select b.id from pos.branches b join pos.merchants m on m.id = b.merchant_id
+  where m.slug = 'kopi-co' and b.slug = 'hq'
+)
+select o.* from pos.orders o where o.branch_id in (select id from hq);
+
+-- current stock of every ingredient at that branch
+select i.name, i.unit, s.current_stock, s.low_stock_threshold
+from pos.ingredient_stocks s join pos.ingredients i on i.id = s.ingredient_id
+where s.branch_id in (select id from hq);
+```
+
+New tables: `merchants (id, slug, name)`, `branches (id, merchant_id, slug, name, is_headquarters, address, is_active, sort_order)`, `ingredient_stocks`, `branch_menu_items`. The demo merchant also has branches `mount-austin` and `skudai` (`npm run demo:branches`), and there may be other merchants (e.g. `teh-tarik-place`).
+
 ## P0
 
 ### `ingredients.cost_per_unit` — `numeric(14,6)`, nullable
@@ -21,37 +52,40 @@ Staff enter it per kg / L / pcs in **Inventory → Edit**; the POS converts. Was
 | column | type | notes |
 |---|---|---|
 | `id` | text (cuid/uuid) | |
-| `date` | `date` | Business date in the store time zone (`store_settings.timezone`, Malaysia) |
+| `branch_id` | text → `branches.id` | the branch that prepared it |
+| `date` | `date` | Business date in the merchant's time zone (`store_settings.timezone`, Malaysia) |
 | `menu_item_id` | text → `menu_items.id` | |
 | `plates_prepared` | int ≥ 0 | |
 | `is_simulated` | bool | `true` = generated demo history |
 | `created_at`, `updated_at` | timestamp (UTC) | |
 
-Unique `(date, menu_item_id)`. Entered on **Admin → Today's prep**. A blank entry deletes the row (unknown ≠ 0).
+Unique `(branch_id, date, menu_item_id)`. Entered on **Admin → Today's prep**. A blank entry deletes the row (unknown ≠ 0).
 
 Sold for a date = `sum(order_items.quantity)` of orders with `status <> 'CANCELLED'` whose `created_at` falls in that local date:
 ```sql
 -- leftover per item per day (Malaysia)
-select p.date, p.menu_item_id, p.plates_prepared,
+select p.branch_id, p.date, p.menu_item_id, p.plates_prepared,
        coalesce(sum(oi.quantity), 0) as sold,
        p.plates_prepared - coalesce(sum(oi.quantity), 0) as leftover
 from pos.daily_prep p
 left join pos.orders o
        on (o.created_at at time zone 'UTC' at time zone 'Asia/Kuala_Lumpur')::date = p.date
+      and o.branch_id = p.branch_id
       and o.status <> 'CANCELLED'
 left join pos.order_items oi on oi.order_id = o.id and oi.menu_item_id = p.menu_item_id
-group by p.date, p.menu_item_id, p.plates_prepared;
+group by p.branch_id, p.date, p.menu_item_id, p.plates_prepared;
 ```
 
 ### `sold_out_events`
 | column | type | notes |
 |---|---|---|
 | `id` | text | |
+| `branch_id` | text → `branches.id` | |
 | `menu_item_id` | text → `menu_items.id` | |
 | `sold_out_at` | timestamp (UTC) | |
 | `is_simulated` | bool | |
 
-Written automatically, in the same transaction, whenever an item goes from available → unavailable (Menu → Hide, or unticking *Available* in the editor). Repeated clicks don't create duplicates; switching back on writes nothing. An item can sell out more than once a day — use the first event per day.
+Written automatically, in the same transaction, whenever an item goes from available → unavailable at a branch (Menu → Hide with that branch selected), or for every branch still selling it when it is switched off for all branches (Hide in *All branches*, or unticking *Available* in the editor). Repeated clicks don't create duplicates; switching back on writes nothing. An item can sell out more than once a day — use the first event per day.
 
 ## P1
 
@@ -62,7 +96,7 @@ Written automatically, in the same transaction, whenever an item goes from avail
 | `store_settings.open_time` / `close_time` | text `HH:MM` (24h), nullable | CHECK-constrained format; local to `timezone` |
 | `store_settings.timezone` | text, default `Asia/Kuala_Lumpur` | IANA name |
 
-`store_settings` is a single row with `id = 1`.
+`store_settings` has one row per merchant (`merchant_id`), shared by all its branches.
 
 ## Running costs — `expenses`
 
@@ -71,6 +105,7 @@ Rent, utilities, salaries etc., entered on **Admin → Costs** (migration `20261
 | column | type | notes |
 |---|---|---|
 | `id` | text | |
+| `merchant_id` | text → `merchants.id` | running costs are per merchant (shared by its branches) |
 | `name` | text | e.g. "Salary – Cook" |
 | `category` | enum | `RENT`, `UTILITIES`, `STAFF`, `EQUIPMENT`, `MAINTENANCE`, `MARKETING`, `LICENSES`, `OTHER` |
 | `amount` | `numeric(12,2)` > 0 | RM **per occurrence of `frequency`** |
@@ -87,11 +122,11 @@ Amount changes are stored as history: changing rent from 1 Dec ends the old row 
 
 ## Live change notifications (optional)
 
-BossBuddy can react to changes instead of polling: `LISTEN pos_changes` on a session connection (port 5432). Each write to a POS table sends `{"schema":"pos","table":"orders","op":"INSERT"}` (one per statement); order status / payment changes also send `{"schema":"pos","table":"orders","op":"UPDATE","id":"…","status":"READY","paymentStatus":"UNPAID"}`. Filter on `schema`. Payloads never contain other data — re-read the table you care about.
+BossBuddy can react to changes instead of polling: `LISTEN pos_changes` on a session connection (port 5432). Each write to a POS table sends `{"schema":"pos","table":"orders","op":"INSERT","m":null,"b":"<branch id>"}` (one per statement and merchant / branch touched; `m` is set for merchant-level tables, `b` for branch-level ones); order status / payment changes also send `{"schema":"pos","table":"orders","op":"UPDATE","b":"…","id":"…","status":"READY","paymentStatus":"UNPAID"}`. Filter on `schema` and your branch / merchant. Payloads never contain other data — re-read the table you care about.
 
 ## P2 — demo history
 
-`npm run demo:history` generates **365 days** before today from real-data patterns (see README → *Simulated history from real-data patterns*, and **Admin → Data sources**):
+`npm run demo:history` generates **365 days** before today, **per branch** (`--merchant=`, `--branch=`), from real-data patterns (see README → *Simulated history from real-data patterns*, and **Admin → Data sources**):
 
 - `orders` (`status = COMPLETED`, `payment_status = PAID`, **`is_simulated = true`**) + `order_items` + `order_ingredients`
 - `daily_prep` for items with `is_prepared_ahead = true` (`is_simulated = true`)

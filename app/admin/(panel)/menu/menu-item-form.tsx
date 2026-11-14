@@ -33,11 +33,13 @@ export function MenuItemForm({
   initial,
   categories,
   ingredients,
+  stockLabel = "In stock",
 }: {
   id: string | null;
   initial: MenuItemFormValues;
   categories: { id: string; name: string }[];
   ingredients: IngredientOption[];
+  stockLabel?: string;
 }) {
   const [values, setValues] = useState(initial);
   const [rows, setRows] = useState<RecipeRow[]>(() => initial.recipe.map((r) => ({ ...r, key: rowKey++ })));
@@ -248,7 +250,7 @@ export function MenuItemForm({
                     </div>
                     {ing && (
                       <p className="mt-1 text-[12px] text-muted">
-                        In stock: {formatQty(ing.currentStock, ing.unit)}
+                        {stockLabel}: {formatQty(ing.currentStock, ing.unit)}
                         {!ing.isActive && <span className="text-warning"> · inactive — item will show as sold out</span>}
                       </p>
                     )}

@@ -6,6 +6,10 @@
  *   npm run db:fill                        # check → fill empties with dummy data → check again
  *   npm run db:fill -- --days=90           # history window (default 365 days)
  *   npm run db:fill -- --undo=latest       # revert the last fill (or --undo=reports/<file>.json)
+ *   npm run db:check -- --merchant=<slug>  # which merchant (default: the first one)
+ *
+ * Merchant-level data (settings, menu, ingredients, floor plan, running costs)
+ * is checked once; order history per branch.
  *
  * Fill never overwrites existing values. It writes a change log to
  * reports/db-fill-<timestamp>.json which --undo uses. Only tables in the POS
@@ -29,11 +33,13 @@ import {
   REAL_DAY_MIN_ORDERS,
   removeSimulated,
   simulateDays,
+  resolveTarget,
   storeInfo,
   type FieldChange,
 } from "./lib/demo";
 import { requireCurrentClient } from "./lib/client-check";
 import { createSampleLayout } from "../lib/services/floor";
+import { branchScale } from "./lib/demo-tenants";
 
 const D = Prisma.Decimal;
 const args = new Map(
@@ -45,6 +51,10 @@ const args = new Map(
 const DAYS = Math.min(730, Math.max(7, Number(args.get("days") ?? 365)));
 const MODE: "check" | "fill" | "undo" = args.has("undo") ? "undo" : args.has("fill") ? "fill" : "check";
 const REPORT_DIR = path.join(process.cwd(), "reports");
+
+type Target = Awaited<ReturnType<typeof resolveTarget>>;
+let T: Target;
+const scaleOf = (b: { slug: string; isHeadquarters: boolean }) => branchScale(b);
 
 // ─── output ────────────────────────────────────────────────────────────
 
@@ -117,7 +127,10 @@ async function runChecks(): Promise<{ rows: Row[]; blocking: boolean; canSimulat
   rows.push({ status: "OK", label: "Migrations", detail: `${mig.expected.length}/${mig.expected.length} applied` });
 
   let fillable = 0;
-  const store = await storeInfo();
+  const merchantId = T.merchant.id;
+  rows.push({ status: "INFO", label: "Merchant", detail: `${T.merchant.name} (${T.merchant.slug}) · ${T.branches.length} branch(es): ${T.branches.map((b) => b.name).join(", ")}` });
+  if (T.multipleMerchants) rows.push({ status: "INFO", label: "Other merchants", detail: `${T.merchants.slice(1).map((m) => m.slug).join(", ")} — check them with --merchant=<slug>` });
+  const store = await storeInfo(merchantId);
   if (!store.exists) {
     fillable++;
     rows.push({ status: "EMPTY", label: "Store settings", detail: "no settings row", fix: "create with hours 07:00–21:00, Asia/Kuala_Lumpur" });
@@ -133,16 +146,19 @@ async function runChecks(): Promise<{ rows: Row[]; blocking: boolean; canSimulat
     rows.push({ status: "OK", label: "Store settings", detail: `${store.name} · ${store.openTime}–${store.closeTime} · ${store.tz}` });
   }
 
-  const admins = await prisma.adminUser.count();
+  const admins = await prisma.adminUser.count({ where: { merchantId } });
   rows.push(
     admins
       ? { status: "OK", label: "Admin accounts", detail: String(admins) }
       : { status: "WARN", label: "Admin accounts", detail: "none", fix: "run `npm run admin:password` (not filled automatically)" },
   );
 
-  const [cats, activeCats] = await Promise.all([prisma.category.count(), prisma.category.count({ where: { isActive: true } })]);
+  const [cats, activeCats] = await Promise.all([
+    prisma.category.count({ where: { merchantId } }),
+    prisma.category.count({ where: { merchantId, isActive: true } }),
+  ]);
   const items = await prisma.menuItem.findMany({
-    where: { isArchived: false },
+    where: { merchantId, isArchived: false },
     select: {
       id: true,
       name: true,
@@ -154,7 +170,7 @@ async function runChecks(): Promise<{ rows: Row[]; blocking: boolean; canSimulat
     },
     orderBy: { name: "asc" },
   });
-  const archived = await prisma.menuItem.count({ where: { isArchived: true } });
+  const archived = await prisma.menuItem.count({ where: { merchantId, isArchived: true } });
   if (!cats || !items.length) {
     rows.push({
       status: "WARN",
@@ -208,7 +224,8 @@ async function runChecks(): Promise<{ rows: Row[]; blocking: boolean; canSimulat
   }
 
   const ingredients = await prisma.ingredient.findMany({
-    select: { name: true, isActive: true, costPerUnit: true, currentStock: true, lowStockThreshold: true },
+    where: { merchantId },
+    select: { name: true, isActive: true, costPerUnit: true },
     orderBy: { name: "asc" },
   });
   const noCost = ingredients.filter((i) => i.costPerUnit === null);
@@ -225,69 +242,82 @@ async function runChecks(): Promise<{ rows: Row[]; blocking: boolean; canSimulat
   } else {
     rows.push({ status: "OK", label: "Ingredient cost", detail: `all ${ingredients.length} ingredients have a cost` });
   }
-  const zeroThreshold = ingredients.filter((i) => i.isActive && i.lowStockThreshold.lte(0)).length;
-  const low = ingredients.filter((i) => i.isActive && i.currentStock.gt(0) && i.currentStock.lte(i.lowStockThreshold)).length;
-  const out = ingredients.filter((i) => i.isActive && i.currentStock.lte(0)).length;
-  if (ingredients.length) {
+  // Stock is kept per branch.
+  for (const b of T.branches) {
+    const stocks = await prisma.ingredientStock.findMany({
+      where: { branchId: b.id, ingredient: { isActive: true } },
+      select: { currentStock: true, lowStockThreshold: true },
+    });
+    if (!ingredients.length) break;
+    const zeroThreshold = stocks.filter((x) => x.lowStockThreshold.lte(0)).length;
+    const low = stocks.filter((x) => x.currentStock.gt(0) && x.currentStock.lte(x.lowStockThreshold)).length;
+    const out = stocks.filter((x) => x.currentStock.lte(0)).length;
+    const missingRows = ingredients.filter((i) => i.isActive).length - stocks.length;
     rows.push({
       status: "INFO",
-      label: "Stock",
-      detail: `${low} low, ${out} out of stock${zeroThreshold ? ` · ${zeroThreshold} with low-stock threshold 0 (never warns; not changed)` : ""}`,
+      label: `Stock · ${b.slug}`,
+      detail: `${low} low, ${out} out of stock${missingRows > 0 ? ` · ${missingRows} never stocked here` : ""}${zeroThreshold ? ` · ${zeroThreshold} with low-stock threshold 0 (never warns; not changed)` : ""}`,
     });
   }
 
-  // Order history over the window.
-  const cov = await historyCoverage(DAYS, store.tz);
-  const [realOrders, simOrders] = await Promise.all([
-    prisma.order.count({ where: { isSimulated: false } }),
-    prisma.order.count({ where: { isSimulated: true } }),
-  ]);
-  const histDetail = `${cov.withData}/${DAYS} days with history (${cov.first} → ${cov.last}) · ${realOrders} real, ${simOrders} simulated orders in total`;
+  // Order history over the window, per branch.
   const canSimulate = items.length > 0;
-  if (cov.needing.length) {
-    fillable++;
-    rows.push({
-      status: "EMPTY",
-      label: "Order history",
-      detail: histDetail,
-      fix: canSimulate
-        ? `simulate ${cov.needing.length} day(s) (days with simulated data or ≥ ${REAL_DAY_MIN_ORDERS} real orders are left alone)`
-        : "add a menu first",
-    });
-  } else {
-    rows.push({ status: "OK", label: "Order history", detail: `${histDetail} · each weekday ≥ ${cov.minPerWeekday}×` });
+  let cov = await historyCoverage(DAYS, store.tz, T.branches[0].id);
+  let anyNeeding = false;
+  for (const b of T.branches) {
+    const c = await historyCoverage(DAYS, store.tz, b.id);
+    if (b === T.branches[0]) cov = c;
+    const [realOrders, simOrders] = await Promise.all([
+      prisma.order.count({ where: { branchId: b.id, isSimulated: false } }),
+      prisma.order.count({ where: { branchId: b.id, isSimulated: true } }),
+    ]);
+    const histDetail = `${c.withData}/${DAYS} days with history (${c.first} → ${c.last}) · ${realOrders} real, ${simOrders} simulated orders in total`;
+    if (c.needing.length) {
+      anyNeeding = true;
+      fillable++;
+      rows.push({
+        status: "EMPTY",
+        label: `History · ${b.slug}`,
+        detail: histDetail,
+        fix: canSimulate
+          ? `simulate ${c.needing.length} day(s) at size ×${scaleOf(b)} (days with simulated data or ≥ ${REAL_DAY_MIN_ORDERS} real orders are left alone)`
+          : "add a menu first",
+      });
+    } else {
+      rows.push({ status: "OK", label: `History · ${b.slug}`, detail: `${histDetail} · each weekday ≥ ${c.minPerWeekday}×` });
+    }
   }
 
   // Daily prep for prepared-ahead items.
   const aheadIds = items.filter((i) => i.isPreparedAhead).map((i) => i.id);
   const [prepInWindow, prepToday] = await Promise.all([
-    prisma.dailyPrep.count({ where: { date: { gte: new Date(`${cov.first}T00:00:00Z`), lt: new Date(`${cov.today}T00:00:00Z`) } } }),
-    prisma.dailyPrep.count({ where: { date: new Date(`${cov.today}T00:00:00Z`) } }),
+    prisma.dailyPrep.count({ where: { branch: { merchantId }, date: { gte: new Date(`${cov.first}T00:00:00Z`), lt: new Date(`${cov.today}T00:00:00Z`) } } }),
+    prisma.dailyPrep.count({ where: { branch: { merchantId }, date: new Date(`${cov.today}T00:00:00Z`) } }),
   ]);
   if (!aheadIds.length && !flagNull.length) {
     rows.push({ status: "INFO", label: "Daily prep", detail: "no prepared-ahead items, so no prep rows expected" });
   } else {
-    const expected = aheadIds.length * DAYS;
+    const expected = aheadIds.length * DAYS * T.branches.length;
     const full = aheadIds.length > 0 && prepInWindow >= expected;
     rows.push({
-      status: full ? "OK" : cov.needing.length ? "EMPTY" : "INFO",
+      status: full ? "OK" : anyNeeding ? "EMPTY" : "INFO",
       label: "Daily prep",
-      detail: `${prepInWindow} row(s) in window${aheadIds.length ? ` (${aheadIds.length} prepared-ahead items × ${DAYS} days = ${expected})` : ""} · today: ${prepToday}`,
+      detail: `${prepInWindow} row(s) in window${aheadIds.length ? ` (${aheadIds.length} prepared-ahead items × ${DAYS} days × ${T.branches.length} branch(es) = ${expected})` : ""} · today: ${prepToday}`,
       fix: full
         ? undefined
-        : cov.needing.length
+        : anyNeeding
           ? "filled for every simulated day; today's prep is left for staff to enter"
           : "days with real orders but no prep are left empty (unknown); today's prep is entered by staff",
     });
   }
 
   const soldOuts = await prisma.soldOutEvent.count({
-    where: { soldOutAt: { gte: dayRangeUtc(cov.first, store.tz).start, lt: dayRangeUtc(cov.today, store.tz).start } },
+    where: { branch: { merchantId }, soldOutAt: { gte: dayRangeUtc(cov.first, store.tz).start, lt: dayRangeUtc(cov.today, store.tz).start } },
   });
   rows.push({ status: "INFO", label: "Sold-out events", detail: `${soldOuts} in window (recorded when items are switched off; simulated days include them)` });
 
   // Floor plan for the 3D floor view.
-  const floorObjects = await prisma.floorObject.findMany({ select: { kind: true } });
+  const floorObjects = await prisma.floorObject.findMany({ where: { merchantId }, select: { kind: true } });
   if (floorObjects.length === 0) {
     fillable++;
     rows.push({ status: "EMPTY", label: "Floor plan", detail: "no floor plan", fix: "add the sample café layout (12 tables, counter, kitchen, pickup point)" });
@@ -297,7 +327,7 @@ async function runChecks(): Promise<{ rows: Row[]; blocking: boolean; canSimulat
   }
 
   // Running costs.
-  const expenses = await prisma.expense.findMany();
+  const expenses = await prisma.expense.findMany({ where: { merchantId } });
   const cats2 = new Set(expenses.map((e) => e.category));
   const missingCats = [...new Set(DEMO_EXPENSES.map((e) => e.category))].filter((c) => !cats2.has(c));
   const today = localDate(new Date(), store.tz);
@@ -345,19 +375,22 @@ async function fill() {
   }
 
   console.log("\nFilling empty data with dummy values…");
-  const f = await fillEmptyFields({ windowDays: DAYS });
-  const { tz } = await storeInfo();
+  const merchantId = T.merchant.id;
+  const f = await fillEmptyFields({ windowDays: DAYS, merchantId });
+  const { tz } = await storeInfo(merchantId);
   let floorPlan: { ids: string[]; at: string } | null = null;
-  if ((await prisma.floorObject.count()) === 0) {
-    await createSampleLayout();
-    floorPlan = { ids: (await prisma.floorObject.findMany({ select: { id: true } })).map((o) => o.id), at: new Date().toISOString() };
+  if ((await prisma.floorObject.count({ where: { merchantId } })) === 0) {
+    await createSampleLayout(merchantId);
+    floorPlan = { ids: (await prisma.floorObject.findMany({ where: { merchantId }, select: { id: true } })).map((o) => o.id), at: new Date().toISOString() };
   }
-  let simulation = null;
+  const simulated: { branchId: string; slug: string; days: string[]; orders: number; plates: number; prepRows: number; soldOuts: number }[] = [];
   if (before.canSimulate) {
-    const cov = await historyCoverage(DAYS, tz);
-    if (cov.needing.length) {
-      console.log(`• Simulating ${cov.needing.length} day(s) of history…`);
-      simulation = await simulateDays(cov.needing, { windowDays: DAYS });
+    for (const b of T.branches) {
+      const cov = await historyCoverage(DAYS, tz, b.id);
+      if (!cov.needing.length) continue;
+      console.log(`• ${b.name}: simulating ${cov.needing.length} day(s) of history…`);
+      const r = await simulateDays(cov.needing, { branchId: b.id, windowDays: DAYS, scale: scaleOf(b) });
+      simulated.push({ branchId: b.id, slug: b.slug, days: r.days, orders: r.orders, plates: r.plates, prepRows: r.prepRows, soldOuts: r.soldOuts });
     }
   }
 
@@ -368,9 +401,11 @@ async function fill() {
     file,
     JSON.stringify(
       {
-        version: 1,
+        version: 2,
         createdAt: new Date().toISOString(),
         schema: dbSchema(),
+        merchantId,
+        merchantSlug: T.merchant.slug,
         timezone: tz,
         windowDays: DAYS,
         fields: f.fields,
@@ -378,8 +413,7 @@ async function fill() {
         insertedExpenseIds: f.insertedExpenseIds,
         insertedExpenseCategories: f.insertedExpenseCategories,
         floorPlan,
-        simulatedDays: simulation?.days ?? [],
-        simulation,
+        simulated,
       },
       null,
       2,
@@ -404,10 +438,10 @@ async function fill() {
     console.log(`  • Running costs: ${f.insertedExpenseIds.length} for ${f.insertedExpenseCategories.map((c) => EXPENSE_CATEGORY_SHORT[c]).join(", ")}`);
   }
   if (floorPlan) console.log(`  • Floor plan: sample café layout (${floorPlan.ids.length} objects)`);
-  if (simulation) {
+  for (const sm of simulated) {
     console.log(
-      `  • History: ${simulation.days.length} day(s), ${simulation.orders} orders, ${simulation.plates} plates, ` +
-        `${simulation.prepRows} prep rows, ${simulation.soldOuts} sold-out events (stock not changed)`,
+      `  • History · ${sm.slug}: ${sm.days.length} day(s), ${sm.orders} orders, ${sm.plates} plates, ` +
+        `${sm.prepRows} prep rows, ${sm.soldOuts} sold-out events (stock not changed)`,
     );
   }
 
@@ -429,6 +463,8 @@ async function undo() {
   if (!file || !fs.existsSync(file)) throw new Error("No fill report found. Pass --undo=reports/db-fill-<timestamp>.json");
   const rep = JSON.parse(fs.readFileSync(file, "utf8"));
   if (rep.schema !== dbSchema()) throw new Error(`Report is for schema "${rep.schema}", but DATABASE_SCHEMA is "${dbSchema()}".`);
+  if (rep.version !== 2 || !rep.merchantId) throw new Error("This report was made before multi-merchant support and can't be undone automatically.");
+  const merchantId: string = rep.merchantId;
   if (rep.undoneAt) console.log(`! This report was already undone at ${rep.undoneAt}; running again is harmless.`);
   console.log(`Undoing ${path.relative(process.cwd(), file)} (created ${rep.createdAt})…`);
 
@@ -453,9 +489,9 @@ async function undo() {
         reverted++;
       } else if (!same(c.field === "aliases" ? cur.aliases : cur.isPreparedAhead, c.before)) kept.push(`${c.label} ${c.field}`);
     } else if (c.table === "store_settings" && (c.field === "openTime" || c.field === "closeTime")) {
-      const cur = await prisma.storeSetting.findUnique({ where: { id: 1 } });
+      const cur = await prisma.storeSetting.findUnique({ where: { merchantId } });
       if (cur && cur[c.field] === c.after) {
-        await prisma.storeSetting.update({ where: { id: 1 }, data: { [c.field]: null } });
+        await prisma.storeSetting.update({ where: { merchantId }, data: { [c.field]: null } });
         reverted++;
       } else if (cur && cur[c.field] !== c.before) kept.push(`store ${c.field}`);
     }
@@ -465,17 +501,23 @@ async function undo() {
   // The sample floor plan is removed only if nobody has saved a layout since.
   let floorRemoved = false;
   if (rep.floorPlan) {
-    const current = await prisma.floorObject.findMany({ select: { id: true, updatedAt: true } });
+    const current = await prisma.floorObject.findMany({ where: { merchantId }, select: { id: true, updatedAt: true } });
     const ids = new Set<string>(rep.floorPlan.ids);
     const untouched =
       current.length === ids.size &&
       current.every((o) => ids.has(o.id) && o.updatedAt.getTime() <= Date.parse(rep.floorPlan.at) + 5000);
     if (untouched) {
-      await prisma.floorObject.deleteMany({});
+      await prisma.floorObject.deleteMany({ where: { merchantId } });
       floorRemoved = true;
     } else kept.push("floor plan (edited since)");
   }
-  const sim = await removeSimulated({ days: rep.simulatedDays ?? [] });
+  const sim = { orders: 0, prep: 0, soldOuts: 0 };
+  for (const sm of (rep.simulated ?? []) as { branchId: string; days: string[] }[]) {
+    const r = await removeSimulated({ merchantId, branchId: sm.branchId, days: sm.days });
+    sim.orders += r.orders;
+    sim.prep += r.prep;
+    sim.soldOuts += r.soldOuts;
+  }
 
   rep.undoneAt = new Date().toISOString();
   fs.writeFileSync(file, JSON.stringify(rep, null, 2));
@@ -491,6 +533,7 @@ async function undo() {
 async function main() {
   requireCurrentClient();
   if (MODE === "undo") return undo();
+  T = await resolveTarget({ merchant: args.get("merchant") });
   if (MODE === "fill") return fill();
   const r = await runChecks();
   printRows(`POS data check (${DAYS}-day window) — read-only`, r.rows);

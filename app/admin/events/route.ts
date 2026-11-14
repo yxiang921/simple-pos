@@ -4,14 +4,17 @@ import { sseResponse } from "@/lib/sse";
 
 export const dynamic = "force-dynamic";
 
-/** Live change stream for the back office (Server-Sent Events). */
+/** Live change stream for the back office (Server-Sent Events): only the signed-in merchant's changes. */
 export async function GET(request: Request) {
-  if (!(await getCurrentAdmin())) return new Response("Unauthorized", { status: 401 });
+  const admin = await getCurrentAdmin();
+  if (!admin) return new Response("Unauthorized", { status: 401 });
   return sseResponse(request, (send) => {
     send("status", { status: changeHub.status });
     return changeHub.subscribe((m) => {
       if (m.type === "status") send("status", { status: m.status });
-      else send("change", { table: m.event.table, op: m.event.op });
+      else if (m.event.merchantId === null || m.event.merchantId === admin.merchantId) {
+        send("change", { table: m.event.table, op: m.event.op, branch: m.event.branchId });
+      }
     });
   });
 }

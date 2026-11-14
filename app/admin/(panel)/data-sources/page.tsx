@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/db";
 import { patternSummary } from "@/lib/patterns";
+import { requireContext } from "@/lib/tenant";
 import { EmptyState, PageHeader, Panel, PanelHeader, Table, TD, TH, THead, TR } from "@/components/ui/misc";
 
 export const metadata: Metadata = { title: "Data sources" };
@@ -10,12 +11,14 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 
 export default async function DataSourcesPage() {
   const p = patternSummary();
+  const ctx = await requireContext();
+  const own = { branch: { merchantId: ctx.merchant.id } };
   const [orders, prep, soldOuts, expenses, oldest] = await Promise.all([
-    prisma.order.count({ where: { isSimulated: true } }),
-    prisma.dailyPrep.count({ where: { isSimulated: true } }),
-    prisma.soldOutEvent.count({ where: { isSimulated: true } }),
-    prisma.expense.count({ where: { isSimulated: true } }),
-    prisma.order.findFirst({ where: { isSimulated: true }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }),
+    prisma.order.count({ where: { ...own, isSimulated: true } }),
+    prisma.dailyPrep.count({ where: { ...own, isSimulated: true } }),
+    prisma.soldOutEvent.count({ where: { ...own, isSimulated: true } }),
+    prisma.expense.count({ where: { merchantId: ctx.merchant.id, isSimulated: true } }),
+    prisma.order.findFirst({ where: { ...own, isSimulated: true }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }),
   ]);
 
   return (

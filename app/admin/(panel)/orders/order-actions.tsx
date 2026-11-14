@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Ban, Eye, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,8 +21,11 @@ export type OrderDetail = {
   totalAmount: string;
   createdAt: string;
   cancelReason: string | null;
-  /** Table number as it is on the floor plan, when the order's table is on it. */
-  floorTable?: string | null;
+  /** Link to the order's table on the floor view (null when the table isn't on the plan). */
+  floorHref?: string | null;
+  /** Link to all orders for the same table. */
+  ordersHref?: string | null;
+  branchName?: string;
   /** Generated history: view only. */
   isSimulated?: boolean;
   items: { id: string; name: string; quantity: number; unitPrice: string; subtotal: string }[];
@@ -116,20 +118,24 @@ function OrderViewDialog({ order, open, onClose }: { order: OrderDetail; open: b
       onClose={onClose}
       width="lg"
       title={`Order ${formatOrderNumber(order.orderNumber)}`}
-      description={`${order.customerName}${order.tableNumber ? ` · Table ${order.tableNumber}` : ""} · ${formatDateTime(order.createdAt)}`}
+      description={`${order.branchName ? `${order.branchName} · ` : ""}${order.customerName}${order.tableNumber ? ` · Table ${order.tableNumber}` : ""} · ${formatDateTime(order.createdAt)}`}
     >
       <div className="space-y-5 text-left text-[13px]">
         <div className="flex flex-wrap items-center gap-2">
           <OrderStatusBadge status={order.status} />
           {order.paymentStatus === "PAID" ? <Badge tone="green">Paid</Badge> : <Badge tone="outline">Unpaid</Badge>}
-          {order.floorTable && (
+          {(order.floorHref || order.ordersHref) && (
             <span className="ml-auto flex gap-3">
-              <Link href={`/admin/floor?table=${encodeURIComponent(order.floorTable)}`} className="text-primary hover:underline">
-                Show table on floor
-              </Link>
-              <Link href={`/admin/orders?table=${encodeURIComponent(order.floorTable)}`} className="text-primary hover:underline">
-                All orders for this table
-              </Link>
+              {order.floorHref && (
+                <a href={order.floorHref} className="text-primary hover:underline">
+                  Show table on floor
+                </a>
+              )}
+              {order.ordersHref && (
+                <a href={order.ordersHref} className="text-primary hover:underline">
+                  All orders for this table
+                </a>
+              )}
             </span>
           )}
         </div>

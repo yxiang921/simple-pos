@@ -17,27 +17,28 @@ const TX_OPTIONS = {
 
 export type CreatedOrder = { id: string; orderNumber: number; replayed: boolean };
 
-type LockedIngredientRow = {
+type LockedStockRow = {
   id: string;
-  name: string;
-  unit: BaseUnit;
   current_stock: string;
   is_active: boolean;
 };
 
 /**
- * Lock ingredient rows in a deterministic order (by id) so concurrent
- * transactions touching overlapping ingredients cannot deadlock.
+ * Lock one branch's stock rows for the given ingredients in a deterministic
+ * order (by ingredient id) so concurrent transactions touching overlapping
+ * ingredients cannot deadlock. Ingredients the branch has never stocked have
+ * no row and count as 0.
  */
-async function lockIngredients(tx: TxClient, ids: string[]) {
-  if (ids.length === 0) return new Map<string, LockedIngredientRow>();
-  const sorted = [...ids].sort();
-  const rows = await tx.$queryRaw<LockedIngredientRow[]>`
-    SELECT id, name, unit::text AS unit, current_stock::text AS current_stock, is_active
-    FROM ${table("ingredients")}
-    WHERE id IN (${Prisma.join(sorted)})
-    ORDER BY id
-    FOR UPDATE`;
+export async function lockBranchStock(tx: TxClient, branchId: string, ingredientIds: string[]) {
+  if (ingredientIds.length === 0) return new Map<string, LockedStockRow>();
+  const sorted = [...ingredientIds].sort();
+  const rows = await tx.$queryRaw<LockedStockRow[]>`
+    SELECT s.ingredient_id AS id, s.current_stock::text AS current_stock, i.is_active
+    FROM ${table("ingredient_stocks")} s
+    JOIN ${table("ingredients")} i ON i.id = s.ingredient_id
+    WHERE s.branch_id = ${branchId} AND s.ingredient_id IN (${Prisma.join(sorted)})
+    ORDER BY s.ingredient_id
+    FOR UPDATE OF s`;
   return new Map(rows.map((r) => [r.id, r]));
 }
 
@@ -61,7 +62,7 @@ async function replayExisting(idempotencyKey: string, requestHash: string): Prom
 }
 
 /**
- * Create a guest order and deduct ingredient stock atomically.
+ * Create a guest order at a branch and deduct that branch's ingredient stock atomically.
  *
  * Guarantees:
  *  - Prices, totals and ingredient requirements are computed from the database only.
@@ -72,8 +73,11 @@ async function replayExisting(idempotencyKey: string, requestHash: string): Prom
  *  - The idempotency key is unique: retries return the original order and never
  *    deduct twice, even when submitted concurrently.
  */
-export async function createOrder(raw: CreateOrderInput): Promise<CreatedOrder> {
+export async function createOrder(branchId: string, raw: CreateOrderInput): Promise<CreatedOrder> {
   const input = createOrderSchema.parse(raw);
+  const branch = await prisma.branch.findUnique({ where: { id: branchId }, select: { id: true, merchantId: true, isActive: true } });
+  if (!branch || !branch.isActive) throw new DomainError("This outlet is not taking orders.", "NOT_ACCEPTING");
+  const merchantId = branch.merchantId;
 
   // Merge duplicate lines for the same menu item, order deterministically.
   const qtyByItem = new Map<string, number>();
@@ -89,7 +93,7 @@ export async function createOrder(raw: CreateOrderInput): Promise<CreatedOrder> 
   // stored in its standard form ("T05" → "5") so the order always matches the floor.
   let tableNumber = input.tableNumber;
   if (tableNumber) {
-    const tables = await prisma.floorObject.findMany({ where: { kind: "TABLE" }, select: { tableNumber: true } });
+    const tables = await prisma.floorObject.findMany({ where: { merchantId, kind: "TABLE" }, select: { tableNumber: true } });
     if (tables.length) {
       const key = normalizeTableNumber(tableNumber);
       if (!key || !tables.some((t) => t.tableNumber === key)) {
@@ -100,6 +104,7 @@ export async function createOrder(raw: CreateOrderInput): Promise<CreatedOrder> 
   }
 
   const requestHash = hashRequest({
+    branchId,
     customerName: input.customerName,
     tableNumber,
     lines,
@@ -112,7 +117,7 @@ export async function createOrder(raw: CreateOrderInput): Promise<CreatedOrder> 
   });
   if (already) return replayExisting(input.idempotencyKey, requestHash);
 
-  const settings = await prisma.storeSetting.findUnique({ where: { id: 1 } });
+  const settings = await prisma.storeSetting.findUnique({ where: { merchantId } });
   if (settings && !settings.acceptingOrders) {
     throw new DomainError("Sorry, we are not accepting orders right now.", "NOT_ACCEPTING");
   }
@@ -120,9 +125,10 @@ export async function createOrder(raw: CreateOrderInput): Promise<CreatedOrder> 
   try {
     return await prisma.$transaction(async (tx) => {
       const menuItems = await tx.menuItem.findMany({
-        where: { id: { in: lines.map(([id]) => id) } },
+        where: { id: { in: lines.map(([id]) => id) }, merchantId },
         include: {
           category: { select: { isActive: true } },
+          branchStatus: { where: { branchId }, select: { isAvailable: true } },
           recipe: { include: { ingredient: { select: { id: true, name: true, unit: true } } } },
         },
       });
@@ -141,7 +147,7 @@ export async function createOrder(raw: CreateOrderInput): Promise<CreatedOrder> 
 
       for (const [menuItemId, quantity] of lines) {
         const item = byId.get(menuItemId);
-        if (!item || item.isArchived || !item.isAvailable || !item.category.isActive) {
+        if (!item || item.isArchived || !item.isAvailable || item.branchStatus[0]?.isAvailable === false || !item.category.isActive) {
           throw new DomainError(
             `${item?.name ?? "An item in your cart"} is no longer available. Please remove it and try again.`,
             "ITEM_UNAVAILABLE",
@@ -172,6 +178,7 @@ export async function createOrder(raw: CreateOrderInput): Promise<CreatedOrder> 
       // unique index and fails with P2002 once this transaction commits.
       const order = await tx.order.create({
         data: {
+          branchId,
           customerName: input.customerName,
           tableNumber,
           totalAmount: total,
@@ -183,7 +190,7 @@ export async function createOrder(raw: CreateOrderInput): Promise<CreatedOrder> 
 
       // Lock and validate all required ingredients before changing anything.
       const ingredientIds = [...requirements.keys()].sort();
-      const locked = await lockIngredients(tx, ingredientIds);
+      const locked = await lockBranchStock(tx, branchId, ingredientIds);
       const shortages: StockShortage[] = [];
       for (const id of ingredientIds) {
         const req = requirements.get(id)!;
@@ -208,8 +215,8 @@ export async function createOrder(raw: CreateOrderInput): Promise<CreatedOrder> 
       const snapshots: Prisma.OrderIngredientCreateManyInput[] = [];
       for (const id of ingredientIds) {
         const req = requirements.get(id)!;
-        const res = await tx.ingredient.updateMany({
-          where: { id, isActive: true, currentStock: { gte: req.qty } },
+        const res = await tx.ingredientStock.updateMany({
+          where: { branchId, ingredientId: id, ingredient: { isActive: true }, currentStock: { gte: req.qty } },
           data: { currentStock: { decrement: req.qty } },
         });
         if (res.count !== 1) {
@@ -233,6 +240,7 @@ export async function createOrder(raw: CreateOrderInput): Promise<CreatedOrder> 
           quantityDeducted: req.qty,
         });
         movements.push({
+          branchId,
           ingredientId: id,
           orderId: order.id,
           movementType: "ORDER_DEDUCTION",
@@ -273,8 +281,8 @@ export async function createOrder(raw: CreateOrderInput): Promise<CreatedOrder> 
  */
 export async function cancelOrder(orderId: string, reason: string, actor?: string) {
   return prisma.$transaction(async (tx) => {
-    const [order] = await tx.$queryRaw<{ id: string; order_number: number; status: OrderStatus; stock_restored_at: Date | null }[]>`
-      SELECT id, order_number, status::text AS status, stock_restored_at
+    const [order] = await tx.$queryRaw<{ id: string; branch_id: string; order_number: number; status: OrderStatus; stock_restored_at: Date | null }[]>`
+      SELECT id, branch_id, order_number, status::text AS status, stock_restored_at
       FROM ${table("orders")} WHERE id = ${orderId} FOR UPDATE`;
     if (!order) throw new DomainError("Order not found.", "NOT_FOUND");
     if (order.status === "CANCELLED") throw new DomainError("This order is already cancelled.", "ALREADY_CANCELLED");
@@ -288,22 +296,27 @@ export async function cancelOrder(orderId: string, reason: string, actor?: strin
         where: { orderId },
         orderBy: { ingredientId: "asc" },
       });
-      const locked = await lockIngredients(
+      const branchId = order.branch_id;
+      const locked = await lockBranchStock(
         tx,
+        branchId,
         deducted.map((d) => d.ingredientId),
       );
       const movements: Prisma.InventoryMovementCreateManyInput[] = [];
       for (const d of deducted) {
-        await tx.ingredient.update({
-          where: { id: d.ingredientId },
-          data: { currentStock: { increment: d.quantityDeducted } },
+        // The stock row exists (the order deducted from it); upsert covers rows removed since.
+        await tx.ingredientStock.upsert({
+          where: { branchId_ingredientId: { branchId, ingredientId: d.ingredientId } },
+          update: { currentStock: { increment: d.quantityDeducted } },
+          create: { branchId, ingredientId: d.ingredientId, currentStock: d.quantityDeducted },
         });
         movements.push({
+          branchId,
           ingredientId: d.ingredientId,
           orderId,
           movementType: "ORDER_CANCELLATION",
           quantityChange: d.quantityDeducted,
-          balanceAfter: new D(locked.get(d.ingredientId)!.current_stock).add(d.quantityDeducted),
+          balanceAfter: new D(locked.get(d.ingredientId)?.current_stock ?? 0).add(d.quantityDeducted),
           reason: `Order #${order.order_number} cancelled: ${reason}`,
           createdBy: actor ?? null,
         });

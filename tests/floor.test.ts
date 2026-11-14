@@ -11,10 +11,10 @@ import {
   type FloorOrder,
 } from "@/lib/floor";
 import { SAMPLE_LAYOUT } from "@/lib/floor-sample";
-import { createSampleLayout, getFloorData, saveFloorLayout } from "@/lib/services/floor";
+import { createSampleLayout, getFloorData, listTables, saveFloorLayout } from "@/lib/services/floor";
 import { createOrder, updateOrderStatus } from "@/lib/services/orders";
 import { floorLayoutSchema } from "@/lib/validation";
-import { orderInput, resetDb, seedBurgerScenario } from "./helpers";
+import { createTenant, orderInput, resetDb, seedBurgerScenario, T } from "./helpers";
 
 beforeEach(resetDb);
 afterAll(() => prisma.$disconnect());
@@ -118,13 +118,14 @@ describe("layout validation", () => {
 
 describe("floor services", () => {
   it("creates the sample layout once, and saving replaces it with normalised table numbers", async () => {
-    const r = await createSampleLayout();
+    const r = await createSampleLayout(T.merchantId);
     expect(r.objects).toBe(SAMPLE_LAYOUT.length);
-    await expect(createSampleLayout()).rejects.toThrow(/already exists/);
+    await expect(createSampleLayout(T.merchantId)).rejects.toThrow(/already exists/);
 
     const before = await prisma.floorObject.findMany({ orderBy: { sortOrder: "asc" } });
     const keep = before.find((o) => o.tableNumber === "1")!;
     await saveFloorLayout(
+      T.merchantId,
       floorLayoutSchema.parse({
         floorWidth: 12,
         floorDepth: 9,
@@ -139,54 +140,67 @@ describe("floor services", () => {
     expect(after[0].id).toBe(keep.id); // existing ids are kept
     expect(after[1].tableNumber).toBe("7");
     expect(after[1].rotation).toBe(270); // stored as 0–359
-    const s = await prisma.storeSetting.findUniqueOrThrow({ where: { id: 1 } });
+    const s = await prisma.storeSetting.findUniqueOrThrow({ where: { merchantId: T.merchantId } });
     expect([s.floorWidth, s.floorDepth]).toEqual([12, 9]);
   });
 
   it("returns only open, real orders for the live view", async () => {
     const s = await seedBurgerScenario();
-    const open = await createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "5" });
-    const done = await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 1 }]));
+    const open = await createOrder(T.branchId, { ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "5" });
+    const done = await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]));
     await updateOrderStatus(done.id, "COMPLETED");
     await prisma.order.create({
-      data: { customerName: "sim", totalAmount: "1", idempotencyKey: "sim-x", requestHash: "x", isSimulated: true, status: "PENDING" },
+      data: { branchId: T.branchId, customerName: "sim", totalAmount: "1", idempotencyKey: "sim-x", requestHash: "x", isSimulated: true, status: "PENDING" },
     });
-    const data = await getFloorData();
+    const data = await getFloorData(T.merchantId, T.branchId);
     expect(data.orders.map((o) => o.id)).toEqual([open.id]);
     expect(data.orders[0].items[0]).toEqual({ name: "Chicken Burger", quantity: 1 });
     expect(data.alertMinutes).toBe(20);
+  });
+
+  it("each merchant has its own floor plan; one can't take over another's object ids", async () => {
+    await createSampleLayout(T.merchantId);
+    const other = await createTenant("other", "Other");
+    const mine = await prisma.floorObject.findMany({ where: { merchantId: T.merchantId } });
+    // Saving a layout that reuses ids of another merchant's objects creates new objects instead.
+    await saveFloorLayout(other.merchantId, floorLayoutSchema.parse({ floorWidth: 10, floorDepth: 8, objects: [{ ...mine[0], x: 0, z: 0 }] }));
+    expect(await prisma.floorObject.count({ where: { merchantId: T.merchantId } })).toBe(mine.length);
+    const theirs = await prisma.floorObject.findMany({ where: { merchantId: other.merchantId } });
+    expect(theirs).toHaveLength(1);
+    expect(theirs[0].id).not.toBe(mine[0].id);
+    expect(await listTables(other.merchantId)).toHaveLength(mine[0].kind === "TABLE" ? 1 : 0);
   });
 });
 
 describe("orders ↔ floor plan", () => {
   it("with a floor plan, accepts only its tables and stores the standard table number", async () => {
     const s = await seedBurgerScenario();
-    await createSampleLayout(); // tables 1–12
-    const ok = await createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "T05" });
+    await createSampleLayout(T.merchantId); // tables 1–12
+    const ok = await createOrder(T.branchId, { ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "T05" });
     expect((await prisma.order.findUniqueOrThrow({ where: { id: ok.id } })).tableNumber).toBe("5");
 
-    await expect(createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "99" })).rejects.toThrow(
+    await expect(createOrder(T.branchId, { ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "99" })).rejects.toThrow(
       /isn't one of our tables/,
     );
     // takeaway (no table) is always fine
-    await createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: null });
+    await createOrder(T.branchId, { ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: null });
     expect(await prisma.order.count()).toBe(2);
   });
 
   it("without a floor plan, any table number is accepted as typed", async () => {
     const s = await seedBurgerScenario();
-    const o = await createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "T99" });
+    const o = await createOrder(T.branchId, { ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "T99" });
     expect((await prisma.order.findUniqueOrThrow({ where: { id: o.id } })).tableNumber).toBe("T99");
   });
 
   it("lists tables in natural order and finds every spelling of a table on orders", async () => {
-    const { listTables, tableNumberVariants } = await import("@/lib/services/floor");
+    const { tableNumberVariants } = await import("@/lib/services/floor");
     const s = await seedBurgerScenario();
-    await createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "T05" });
-    await createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "05" });
-    await createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "6" });
-    expect((await tableNumberVariants("5")).sort()).toEqual(["05", "T05"]);
-    await createSampleLayout();
-    expect((await listTables()).map((t) => t.tableNumber)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]);
+    await createOrder(T.branchId, { ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "T05" });
+    await createOrder(T.branchId, { ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "05" });
+    await createOrder(T.branchId, { ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "6" });
+    expect((await tableNumberVariants({ branchId: T.branchId }, "5")).sort()).toEqual(["05", "T05"]);
+    await createSampleLayout(T.merchantId);
+    expect((await listTables(T.merchantId)).map((t) => t.tableNumber)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]);
   });
 });

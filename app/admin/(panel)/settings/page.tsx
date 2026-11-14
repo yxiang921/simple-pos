@@ -1,28 +1,29 @@
 import type { Metadata } from "next";
-import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
+import { requireContext } from "@/lib/tenant";
 import { PageHeader, Panel, PanelHeader } from "@/components/ui/misc";
 import { PasswordForm, StoreForm } from "./settings-forms";
 
 export const metadata: Metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
-  const admin = await requireAdmin();
-  const settings = await prisma.storeSetting.findUnique({ where: { id: 1 } });
+  const { admin, settings, branches } = await requireContext();
 
   return (
     <>
-      <PageHeader title="Settings" />
+      <PageHeader
+        title="Settings"
+        description={branches.length > 1 ? `These settings apply to all ${branches.length} branches.` : undefined}
+      />
       <div className="grid max-w-4xl gap-5 lg:grid-cols-2">
         <Panel>
           <PanelHeader title="Store" />
           <StoreForm
-            storeName={settings?.storeName ?? "Kopi & Co."}
-            acceptingOrders={settings?.acceptingOrders ?? true}
-            openTime={settings?.openTime ?? ""}
-            closeTime={settings?.closeTime ?? ""}
-            timezone={settings?.timezone ?? "Asia/Kuala_Lumpur"}
-            orderAlertMinutes={settings?.orderAlertMinutes ?? 20}
+            storeName={settings.storeName}
+            acceptingOrders={settings.acceptingOrders}
+            openTime={settings.openTime ?? ""}
+            closeTime={settings.closeTime ?? ""}
+            timezone={settings.timezone}
+            orderAlertMinutes={settings.orderAlertMinutes}
           />
         </Panel>
         <Panel>

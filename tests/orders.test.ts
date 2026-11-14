@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { DomainError, InsufficientStockError } from "@/lib/errors";
 import { cancelOrder, createOrder, updateOrderStatus } from "@/lib/services/orders";
 import { adjustStock } from "@/lib/services/inventory";
-import { D, orderInput, resetDb, seedBurgerScenario, stockOf } from "./helpers";
+import { createIngredient, D, orderInput, resetDb, seedBurgerScenario, setStock, stockOf, T } from "./helpers";
 
 beforeEach(resetDb);
 afterAll(() => prisma.$disconnect());
@@ -12,7 +12,7 @@ afterAll(() => prisma.$disconnect());
 describe("automatic ingredient deduction", () => {
   it("deducts recipe × quantity for the spec scenario (2 × Chicken Burger)", async () => {
     const s = await seedBurgerScenario();
-    const res = await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 2 }]));
+    const res = await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 2 }]));
 
     expect(await stockOf(s.bun.id)).toBe("18");
     expect(await stockOf(s.patty.id)).toBe("13");
@@ -43,6 +43,7 @@ describe("automatic ingredient deduction", () => {
     // patties = 10 + 12 = 22 > 15 → must reject even though each line alone fits.
     const double = await prisma.menuItem.create({
       data: {
+        merchantId: T.merchantId,
         name: "Double Patty Burger",
         price: D("16.90"),
         categoryId: s.category.id,
@@ -55,6 +56,7 @@ describe("automatic ingredient deduction", () => {
       },
     });
     const attempt = createOrder(
+      T.branchId,
       orderInput([
         { menuItemId: s.burger.id, quantity: 10 },
         { menuItemId: double.id, quantity: 6 },
@@ -76,6 +78,7 @@ describe("automatic ingredient deduction", () => {
   it("merges duplicate cart lines for the same item", async () => {
     const s = await seedBurgerScenario();
     const res = await createOrder(
+      T.branchId,
       orderInput([
         { menuItemId: s.burger.id, quantity: 1 },
         { menuItemId: s.burger.id, quantity: 2 },
@@ -89,7 +92,7 @@ describe("automatic ingredient deduction", () => {
 
   it("rejects the order and changes nothing when stock is insufficient", async () => {
     const s = await seedBurgerScenario();
-    await expect(createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 16 }]))).rejects.toBeInstanceOf(
+    await expect(createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 16 }]))).rejects.toBeInstanceOf(
       InsufficientStockError,
     );
     expect(await prisma.order.count()).toBe(0);
@@ -100,9 +103,9 @@ describe("automatic ingredient deduction", () => {
 
   it("allows an order that uses exactly all remaining stock, never going negative", async () => {
     const s = await seedBurgerScenario();
-    await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 15 }]));
+    await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 15 }]));
     expect(await stockOf(s.patty.id)).toBe("0");
-    await expect(createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 1 }]))).rejects.toBeInstanceOf(
+    await expect(createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]))).rejects.toBeInstanceOf(
       InsufficientStockError,
     );
     expect(await stockOf(s.patty.id)).toBe("0");
@@ -114,15 +117,15 @@ describe("automatic ingredient deduction", () => {
       where: { menuItemId: s.burger.id, ingredientId: s.lettuce.id },
       data: { quantityRequired: D("0.1") },
     });
-    for (let i = 0; i < 3; i++) await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 1 }]));
+    for (let i = 0; i < 3; i++) await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]));
     expect(await stockOf(s.lettuce.id)).toBe("999.7");
   });
 
   it("rejects unavailable, archived, and unknown menu items", async () => {
     const s = await seedBurgerScenario();
     await prisma.menuItem.update({ where: { id: s.burger.id }, data: { isAvailable: false } });
-    await expect(createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 1 }]))).rejects.toBeInstanceOf(DomainError);
-    await expect(createOrder(orderInput([{ menuItemId: "does-not-exist", quantity: 1 }]))).rejects.toBeInstanceOf(
+    await expect(createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]))).rejects.toBeInstanceOf(DomainError);
+    await expect(createOrder(T.branchId, orderInput([{ menuItemId: "does-not-exist", quantity: 1 }]))).rejects.toBeInstanceOf(
       DomainError,
     );
     expect(await prisma.order.count()).toBe(0);
@@ -131,7 +134,7 @@ describe("automatic ingredient deduction", () => {
   it("treats a deactivated ingredient as out of stock", async () => {
     const s = await seedBurgerScenario();
     await prisma.ingredient.update({ where: { id: s.mayo.id }, data: { isActive: false } });
-    await expect(createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 1 }]))).rejects.toBeInstanceOf(
+    await expect(createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]))).rejects.toBeInstanceOf(
       InsufficientStockError,
     );
   });
@@ -139,7 +142,10 @@ describe("automatic ingredient deduction", () => {
   it("the CHECK constraint blocks negative stock even outside the service", async () => {
     const s = await seedBurgerScenario();
     await expect(
-      prisma.ingredient.update({ where: { id: s.bun.id }, data: { currentStock: { decrement: 21 } } }),
+      prisma.ingredientStock.update({
+        where: { branchId_ingredientId: { branchId: T.branchId, ingredientId: s.bun.id } },
+        data: { currentStock: { decrement: 21 } },
+      }),
     ).rejects.toThrow();
     expect(await stockOf(s.bun.id)).toBe("20");
   });
@@ -148,7 +154,7 @@ describe("automatic ingredient deduction", () => {
 describe("cancellation and restoration", () => {
   it("restores exactly the snapshot quantities, even after the recipe changed", async () => {
     const s = await seedBurgerScenario();
-    const res = await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 2 }]));
+    const res = await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 2 }]));
 
     // Recipe changes after the order must not affect what is restored.
     await prisma.menuItemIngredient.updateMany({
@@ -177,7 +183,7 @@ describe("cancellation and restoration", () => {
 
   it("restores only once, including under concurrent cancel requests", async () => {
     const s = await seedBurgerScenario();
-    const res = await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 3 }]));
+    const res = await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 3 }]));
 
     const results = await Promise.allSettled(Array.from({ length: 5 }, () => cancelOrder(res.id, "Duplicate click")));
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
@@ -195,20 +201,20 @@ describe("cancellation and restoration", () => {
 
   it("does not allow cancelling completed orders, or moving cancelled orders", async () => {
     const s = await seedBurgerScenario();
-    const a = await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 1 }]));
+    const a = await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]));
     await updateOrderStatus(a.id, "COMPLETED");
     await expect(cancelOrder(a.id, "late")).rejects.toThrow(/Completed/);
     expect(await stockOf(s.patty.id)).toBe("14");
 
-    const b = await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 1 }]));
+    const b = await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]));
     await cancelOrder(b.id, "mistake");
     await expect(updateOrderStatus(b.id, "PREPARING")).rejects.toBeInstanceOf(DomainError);
   });
 
   it("restoration after restock keeps a correct running balance", async () => {
     const s = await seedBurgerScenario();
-    const res = await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 5 }]));
-    await adjustStock({ ingredientId: s.patty.id, kind: "RESTOCK", quantity: "10", inputUnit: "pcs", reason: "" });
+    const res = await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 5 }]));
+    await adjustStock(T.branchId, { ingredientId: s.patty.id, kind: "RESTOCK", quantity: "10", inputUnit: "pcs", reason: "" });
     await cancelOrder(res.id, "Kitchen issue");
     expect(await stockOf(s.patty.id)).toBe("25");
     const last = await prisma.inventoryMovement.findFirstOrThrow({
@@ -221,10 +227,10 @@ describe("cancellation and restoration", () => {
 describe("concurrent ordering", () => {
   it("never oversells when many guests order the last items simultaneously", async () => {
     const s = await seedBurgerScenario();
-    await prisma.ingredient.update({ where: { id: s.patty.id }, data: { currentStock: D(5) } });
+    await setStock(s.patty.id, 5);
 
     const results = await Promise.allSettled(
-      Array.from({ length: 12 }, () => createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 1 }]))),
+      Array.from({ length: 12 }, () => createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]))),
     );
     const ok = results.filter((r) => r.status === "fulfilled");
     const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
@@ -242,9 +248,10 @@ describe("concurrent ordering", () => {
 
   it("handles concurrent multi-item orders over overlapping ingredients without deadlock", async () => {
     const s = await seedBurgerScenario();
-    const fries = await prisma.ingredient.create({ data: { name: "Fries", unit: "G", currentStock: D(10000) } });
+    const fries = await createIngredient({ name: "Fries", unit: "G", currentStock: 10000 });
     const combo = await prisma.menuItem.create({
       data: {
+        merchantId: T.merchantId,
         name: "Burger Combo",
         price: D("18.90"),
         categoryId: s.category.id,
@@ -260,6 +267,7 @@ describe("concurrent ordering", () => {
     const results = await Promise.allSettled(
       Array.from({ length: 10 }, (_, i) =>
         createOrder(
+      T.branchId,
           orderInput(
             i % 2
               ? [
@@ -285,8 +293,8 @@ describe("duplicate submission (idempotency)", () => {
   it("returns the original order on retry and deducts only once", async () => {
     const s = await seedBurgerScenario();
     const key = randomUUID();
-    const first = await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 2 }], key));
-    const retry = await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 2 }], key));
+    const first = await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 2 }], key));
+    const retry = await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 2 }], key));
 
     expect(retry.id).toBe(first.id);
     expect(first.replayed).toBe(false);
@@ -299,7 +307,7 @@ describe("duplicate submission (idempotency)", () => {
     const s = await seedBurgerScenario();
     const key = randomUUID();
     const results = await Promise.all(
-      Array.from({ length: 6 }, () => createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 2 }], key))),
+      Array.from({ length: 6 }, () => createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 2 }], key))),
     );
     expect(new Set(results.map((r) => r.id)).size).toBe(1);
     expect(results.filter((r) => !r.replayed)).toHaveLength(1);
@@ -312,8 +320,8 @@ describe("duplicate submission (idempotency)", () => {
   it("rejects reuse of a key with a different cart", async () => {
     const s = await seedBurgerScenario();
     const key = randomUUID();
-    await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 1 }], key));
-    await expect(createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 5 }], key))).rejects.toThrow(
+    await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 1 }], key));
+    await expect(createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 5 }], key))).rejects.toThrow(
       /different cart/,
     );
     expect(await stockOf(s.patty.id)).toBe("14");
@@ -322,12 +330,56 @@ describe("duplicate submission (idempotency)", () => {
   it("a failed attempt (insufficient stock) does not burn the key", async () => {
     const s = await seedBurgerScenario();
     const key = randomUUID();
-    await expect(createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 20 }], key))).rejects.toBeInstanceOf(
+    await expect(createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 20 }], key))).rejects.toBeInstanceOf(
       InsufficientStockError,
     );
     // Guest reduces the quantity and retries with the same checkout key.
-    const ok = await createOrder(orderInput([{ menuItemId: s.burger.id, quantity: 2 }], key));
+    const ok = await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 2 }], key));
     expect(ok.replayed).toBe(false);
     expect(await stockOf(s.patty.id)).toBe("13");
+  });
+});
+
+describe("branches", () => {
+  it("deducts only the ordering branch's stock and rejects when that branch is short", async () => {
+    const { addBranch } = await import("./helpers");
+    const s = await seedBurgerScenario();
+    const other = await addBranch("mount-austin", "Mount Austin");
+    for (const [id, qty] of [[s.bun.id, 3], [s.patty.id, 1], [s.lettuce.id, 500], [s.mayo.id, 500]] as const) await setStock(id, qty, other.id);
+
+    const res = await createOrder(other.id, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]));
+    expect(await stockOf(s.patty.id, other.id)).toBe("0");
+    expect(await stockOf(s.patty.id)).toBe("15"); // HQ untouched
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: res.id }, include: { movements: true } });
+    expect(order.branchId).toBe(other.id);
+    expect(order.movements.every((m) => m.branchId === other.id)).toBe(true);
+
+    await expect(createOrder(other.id, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]))).rejects.toBeInstanceOf(InsufficientStockError);
+    await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 1 }])); // HQ still has stock
+
+    await cancelOrder(res.id, "test");
+    expect(await stockOf(s.patty.id, other.id)).toBe("1"); // restored at the branch it came from
+    expect(await stockOf(s.patty.id)).toBe("14");
+  });
+
+  it("an item switched off at one branch can still be ordered at another", async () => {
+    const { addBranch } = await import("./helpers");
+    const { setMenuItemAvailability } = await import("@/lib/services/menu");
+    const s = await seedBurgerScenario();
+    const other = await addBranch("skudai");
+    for (const id of [s.bun.id, s.patty.id, s.lettuce.id, s.mayo.id]) await setStock(id, 100, other.id);
+    await setMenuItemAvailability(T.merchantId, s.burger.id, false, other.id);
+    await expect(createOrder(other.id, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]))).rejects.toThrow(/no longer available/);
+    await createOrder(T.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]));
+    expect(await prisma.soldOutEvent.count({ where: { branchId: other.id } })).toBe(1);
+    expect(await prisma.soldOutEvent.count({ where: { branchId: T.branchId } })).toBe(0);
+  });
+
+  it("never sells another merchant's menu items", async () => {
+    const { createTenant } = await import("./helpers");
+    const s = await seedBurgerScenario();
+    const other = await createTenant("other-shop", "Other Shop");
+    await expect(createOrder(other.branchId, orderInput([{ menuItemId: s.burger.id, quantity: 1 }]))).rejects.toThrow(/no longer available/);
+    expect(await prisma.order.count()).toBe(0);
   });
 });

@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import { Plus } from "lucide-react";
-import type { Prisma } from "@/lib/generated/prisma/client";
+import { Prisma } from "@/lib/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { computeMaxServings } from "@/lib/services/menu";
 import { formatDateTime, formatRM } from "@/lib/format";
+import { requireContext } from "@/lib/tenant";
 import { ButtonLink, buttonClass } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/form";
 import { Badge, EmptyState, PageHeader, Panel, Table, TD, TH, THead, TR } from "@/components/ui/misc";
@@ -15,10 +16,13 @@ export const metadata: Metadata = { title: "Menu" };
 
 export default async function MenuPage({ searchParams }: PageProps<"/admin/menu">) {
   const sp = await searchParams;
+  const ctx = await requireContext();
+  const branchId = ctx.branch?.id ?? null;
+  const activeBranches = ctx.branches.filter((b) => b.isActive);
   const q = typeof sp.q === "string" ? sp.q.trim().slice(0, 60) : "";
   const categoryId = typeof sp.category === "string" ? sp.category : "";
 
-  const where: Prisma.MenuItemWhereInput = { isArchived: false };
+  const where: Prisma.MenuItemWhereInput = { merchantId: ctx.merchant.id, isArchived: false };
   if (q) where.name = { contains: q, mode: "insensitive" };
   if (categoryId) where.categoryId = categoryId;
 
@@ -28,10 +32,15 @@ export default async function MenuPage({ searchParams }: PageProps<"/admin/menu"
       orderBy: [{ category: { sortOrder: "asc" } }, { name: "asc" }],
       include: {
         category: { select: { name: true, isActive: true } },
-        recipe: { include: { ingredient: { select: { currentStock: true, isActive: true } } } },
+        recipe: {
+          include: {
+            ingredient: { select: { isActive: true, stocks: { where: { branchId: branchId ?? "-" }, select: { currentStock: true } } } },
+          },
+        },
+        branchStatus: { where: { isAvailable: false }, select: { branchId: true } },
       },
     }),
-    prisma.category.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+    prisma.category.findMany({ where: { merchantId: ctx.merchant.id }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
   ]);
 
   return (
@@ -39,7 +48,13 @@ export default async function MenuPage({ searchParams }: PageProps<"/admin/menu"
       <SavedToast />
       <PageHeader
         title="Menu"
-        description="Items, prices and the ingredient recipe used for stock deduction."
+        description={
+          ctx.branches.length > 1
+            ? branchId
+              ? `The menu is shared by all branches. Hide / Show here only affects ${ctx.branch!.name}; stock figures are this branch's.`
+              : "The menu is shared by all branches. In this view Hide / Show applies to every branch."
+            : "Items, prices and the ingredient recipe used for stock deduction."
+        }
         actions={
           <ButtonLink href="/admin/menu/new" variant="primary">
             <Plus /> New item
@@ -82,7 +97,7 @@ export default async function MenuPage({ searchParams }: PageProps<"/admin/menu"
                 <TH>Category</TH>
                 <TH className="text-right">Price</TH>
                 <TH className="text-right">Recipe</TH>
-                <TH className="text-right">Can make</TH>
+                {branchId && <TH className="text-right">Can make</TH>}
                 <TH>Status</TH>
                 <TH>Updated</TH>
                 <TH className="text-right">Actions</TH>
@@ -90,7 +105,16 @@ export default async function MenuPage({ searchParams }: PageProps<"/admin/menu"
             </THead>
             <tbody>
               {items.map((m) => {
-                const servings = computeMaxServings(m.recipe);
+                const servings = branchId
+                  ? computeMaxServings(
+                      m.recipe.map((r) => ({
+                        quantityRequired: r.quantityRequired,
+                        ingredient: { isActive: r.ingredient.isActive, currentStock: r.ingredient.stocks[0]?.currentStock ?? new Prisma.Decimal(0) },
+                      })),
+                    )
+                  : null;
+                const offHere = branchId ? m.branchStatus.some((b) => b.branchId === branchId) : false;
+                const offAt = activeBranches.filter((b) => m.branchStatus.some((x) => x.branchId === b.id));
                 return (
                   <TR key={m.id}>
                     <TD>
@@ -121,6 +145,7 @@ export default async function MenuPage({ searchParams }: PageProps<"/admin/menu"
                     <TD className="tabular text-right">
                       {m.recipe.length ? `${m.recipe.length} ingr.` : <span className="text-warning">None</span>}
                     </TD>
+                    {branchId && (
                     <TD className="tabular text-right">
                       {servings === null ? (
                         <span className="text-muted">—</span>
@@ -130,10 +155,29 @@ export default async function MenuPage({ searchParams }: PageProps<"/admin/menu"
                         <span className={servings <= 5 ? "text-warning" : undefined}>{servings}</span>
                       )}
                     </TD>
-                    <TD>{m.isAvailable ? <span className="text-[12px] text-muted">On menu</span> : <Badge tone="outline">Hidden</Badge>}</TD>
+                    )}
+                    <TD>
+                      {!m.isAvailable ? (
+                        <Badge tone="outline">{ctx.branches.length > 1 ? "Hidden everywhere" : "Hidden"}</Badge>
+                      ) : offHere ? (
+                        <Badge tone="outline">Off at this branch</Badge>
+                      ) : !branchId && offAt.length ? (
+                        <span className="text-[12px] text-warning" title={offAt.map((b) => b.name).join(", ")}>
+                          Off at {offAt.length === 1 ? offAt[0].name : `${offAt.length} branches`}
+                        </span>
+                      ) : (
+                        <span className="text-[12px] text-muted">On menu</span>
+                      )}
+                    </TD>
                     <TD className="tabular whitespace-nowrap text-muted">{formatDateTime(m.updatedAt)}</TD>
                     <TD className="text-right">
-                      <MenuRowActions id={m.id} name={m.name} isAvailable={m.isAvailable} />
+                      <MenuRowActions
+                        id={m.id}
+                        name={m.name}
+                        isAvailable={branchId ? m.isAvailable && !offHere : m.isAvailable}
+                        scope={branchId ? (ctx.branches.length > 1 ? ctx.branch!.name : null) : ctx.branches.length > 1 ? "all branches" : null}
+                        locked={Boolean(branchId) && !m.isAvailable && ctx.branches.length > 1}
+                      />
                     </TD>
                   </TR>
                 );

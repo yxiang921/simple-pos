@@ -31,16 +31,26 @@ function toData(input: ExpenseInput) {
   };
 }
 
-export async function createExpense(input: ExpenseInput) {
-  return prisma.expense.create({ data: toData(input) });
+// Running costs belong to the merchant (shared by all branches).
+
+async function ownExpense(merchantId: string, id: string) {
+  const e = await prisma.expense.findFirst({ where: { id, merchantId } });
+  if (!e) throw new DomainError("Running cost not found.", "NOT_FOUND");
+  return e;
+}
+
+export async function createExpense(merchantId: string, input: ExpenseInput) {
+  return prisma.expense.create({ data: { merchantId, ...toData(input) } });
 }
 
 /** Saving an entry in the app confirms it, so it no longer counts as dummy/simulated data. */
-export async function updateExpense(id: string, input: ExpenseInput) {
+export async function updateExpense(merchantId: string, id: string, input: ExpenseInput) {
+  await ownExpense(merchantId, id);
   return prisma.expense.update({ where: { id }, data: { ...toData(input), isSimulated: false } });
 }
 
-export async function deleteExpense(id: string) {
+export async function deleteExpense(merchantId: string, id: string) {
+  await ownExpense(merchantId, id);
   await prisma.expense.delete({ where: { id } });
 }
 
@@ -49,9 +59,9 @@ export async function deleteExpense(id: string) {
  * while keeping past months correct: the current entry ends the day before,
  * and a copy with the new amount starts on `effectiveFrom`.
  */
-export async function changeExpenseAmount(id: string, amount: string, effectiveFrom: string) {
+export async function changeExpenseAmount(merchantId: string, id: string, amount: string, effectiveFrom: string) {
   return prisma.$transaction(async (tx) => {
-    const e = await tx.expense.findUnique({ where: { id } });
+    const e = await tx.expense.findFirst({ where: { id, merchantId } });
     if (!e) throw new DomainError("Expense not found.", "NOT_FOUND");
     if (e.frequency === "ONE_TIME") throw new DomainError("One-time expenses can simply be edited.");
     const start = iso(e.startDate);
@@ -65,6 +75,7 @@ export async function changeExpenseAmount(id: string, amount: string, effectiveF
     await tx.expense.update({ where: { id }, data: { endDate: dateColumn(addDays(effectiveFrom, -1)) } });
     return tx.expense.create({
       data: {
+        merchantId,
         name: e.name,
         category: e.category,
         amount: new D(amount),
@@ -125,9 +136,10 @@ export function monthlyEquivalent(amount: Decimal, frequency: ExpenseFrequency):
 }
 
 /** Overheads between two local dates inclusive, total and by category. */
-export async function overheadsForRange(from: string, to: string) {
+export async function overheadsForRange(merchantId: string, from: string, to: string) {
   const rows = await prisma.expense.findMany({
     where: {
+      merchantId,
       startDate: { lte: dateColumn(to) },
       OR: [{ endDate: null }, { endDate: { gte: dateColumn(from) } }],
     },
@@ -150,17 +162,24 @@ export async function overheadsForRange(from: string, to: string) {
  * Month summary: sales, ingredient cost of goods sold, overheads and estimated profit.
  * Ingredient cost uses the deducted-quantity snapshots × CURRENT ingredient cost
  * (costs are not snapshotted), so it is an estimate.
+ *
+ * Sales and ingredient cost cover one branch (branchId) or all of the merchant's
+ * branches; overheads are the merchant's (shared) running costs.
  */
-export async function monthSummary(month: string, tz: string, includeSimulated: boolean) {
+export async function monthSummary(merchantId: string, month: string, tz: string, includeSimulated: boolean, branchId?: string | null) {
   const from = `${month}-01`;
   const to = `${month}-${String(daysInMonth(from)).padStart(2, "0")}`;
   const start = dayRangeUtc(from, tz).start;
   const end = dayRangeUtc(to, tz).end;
   const sim = includeSimulated ? Prisma.empty : Prisma.sql`AND o.is_simulated = false`;
+  const branchSql = branchId
+    ? Prisma.sql`AND o.branch_id = ${branchId} AND b.merchant_id = ${merchantId}`
+    : Prisma.sql`AND b.merchant_id = ${merchantId}`;
 
-  const [sales, cogs, overheads] = await Promise.all([
+  const [sales, cogs, overheads, byBranch] = await Promise.all([
     prisma.order.aggregate({
       where: {
+        ...(branchId ? { branchId, branch: { merchantId } } : { branch: { merchantId } }),
         createdAt: { gte: start, lt: end },
         status: { not: "CANCELLED" },
         ...(includeSimulated ? {} : { isSimulated: false }),
@@ -173,10 +192,22 @@ export async function monthSummary(month: string, tz: string, includeSimulated: 
              COUNT(DISTINCT i.id) FILTER (WHERE i.cost_per_unit IS NULL) AS uncosted
       FROM ${table("order_ingredients")} oi
       JOIN ${table("orders")} o ON o.id = oi.order_id
+      JOIN ${table("branches")} b ON b.id = o.branch_id
       JOIN ${table("ingredients")} i ON i.id = oi.ingredient_id
       WHERE o.created_at >= ${start} AND o.created_at < ${end}
-        AND o.status <> 'CANCELLED' ${sim}`,
-    overheadsForRange(from, to),
+        AND o.status <> 'CANCELLED' ${sim} ${branchSql}`,
+    overheadsForRange(merchantId, from, to),
+    prisma.order.groupBy({
+      by: ["branchId"],
+      where: {
+        branch: { merchantId },
+        createdAt: { gte: start, lt: end },
+        status: { not: "CANCELLED" },
+        ...(includeSimulated ? {} : { isSimulated: false }),
+      },
+      _sum: { totalAmount: true },
+      _count: true,
+    }),
   ]);
 
   const revenue = sales._sum.totalAmount ?? new D(0);
@@ -202,5 +233,7 @@ export async function monthSummary(month: string, tz: string, includeSimulated: 
     netProfit,
     overheadPerDay,
     breakEvenPerDay,
+    /** Sales per branch (all branches of the merchant), for the HQ view. */
+    salesByBranch: new Map(byBranch.map((r) => [r.branchId, { revenue: r._sum.totalAmount ?? new D(0), orders: r._count }])),
   };
 }

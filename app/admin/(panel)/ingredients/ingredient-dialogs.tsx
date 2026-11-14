@@ -25,23 +25,42 @@ export type IngredientRow = {
   isActive: boolean;
   /** RM per kg / L / pcs, "" = unknown */
   cost: string;
+  /** Current stock per branch id (base units). */
+  stockByBranch: Record<string, string>;
 };
+
+/** Branches of the merchant and the one selected in the back office (null = all branches). */
+export type BranchChoice = { branches: { id: string; name: string }[]; current: string | null; hqId: string };
 
 type Errors = Record<string, string[] | undefined>;
 
-export function IngredientToolbar() {
+export function IngredientToolbar({ branches }: { branches: BranchChoice }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <Button variant="primary" onClick={() => setOpen(true)}>
         <Plus /> New ingredient
       </Button>
-      {open && <CreateDialog onClose={() => setOpen(false)} />}
+      {open && <CreateDialog branches={branches} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-export function IngredientRowActions({ ingredient }: { ingredient: IngredientRow }) {
+function BranchSelect({ id, value, onChange, branches, label }: { id: string; value: string; onChange: (v: string) => void; branches: BranchChoice; label: string }) {
+  return (
+    <Field label={label} htmlFor={id}>
+      <Select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+        {branches.branches.map((b) => (
+          <option key={b.id} value={b.id}>
+            {b.name}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
+}
+
+export function IngredientRowActions({ ingredient, branches }: { ingredient: IngredientRow; branches: BranchChoice }) {
   const [dialog, setDialog] = useState<"stock" | "edit" | "delete" | null>(null);
   return (
     <div className="flex items-center justify-end gap-1">
@@ -69,28 +88,39 @@ export function IngredientRowActions({ ingredient }: { ingredient: IngredientRow
       >
         <Trash2 />
       </Button>
-      {dialog === "stock" && <StockDialog ingredient={ingredient} onClose={() => setDialog(null)} />}
-      {dialog === "edit" && <EditDialog ingredient={ingredient} onClose={() => setDialog(null)} />}
+      {dialog === "stock" && <StockDialog ingredient={ingredient} branches={branches} onClose={() => setDialog(null)} />}
+      {dialog === "edit" && <EditDialog ingredient={ingredient} branches={branches} onClose={() => setDialog(null)} />}
       {dialog === "delete" && <DeleteDialog ingredient={ingredient} onClose={() => setDialog(null)} />}
     </div>
   );
 }
 
-function CreateDialog({ onClose }: { onClose: () => void }) {
+function CreateDialog({ branches, onClose }: { branches: BranchChoice; onClose: () => void }) {
   const toast = useToast();
+  const multi = branches.branches.length > 1;
+  const [branchId, setBranchId] = useState(branches.current ?? branches.hqId);
   const [v, setV] = useState({ name: "", sku: "", unit: "G" as BaseUnitCode, initialStock: "0", lowStockThreshold: "0", cost: "" });
   const [error, setError] = useState<string | null>(null);
   const [fe, setFe] = useState<Errors>({});
   const [pending, startTransition] = useTransition();
 
   return (
-    <Dialog open onClose={onClose} title="New ingredient" description="Stock is tracked in the base unit you choose here.">
+    <Dialog
+      open
+      onClose={onClose}
+      title="New ingredient"
+      description={
+        multi
+          ? "Added to the catalog of every branch. Stock is tracked per branch in the base unit you choose here."
+          : "Stock is tracked in the base unit you choose here."
+      }
+    >
       <form
         className="space-y-4 text-left"
         onSubmit={(e) => {
           e.preventDefault();
           startTransition(async () => {
-            const res = await createIngredientAction({ ...v, costUnit: COST_UNIT[v.unit].value });
+            const res = await createIngredientAction({ ...v, costUnit: COST_UNIT[v.unit].value, branchId });
             if (res.ok) {
               toast(`${v.name} added`);
               onClose();
@@ -122,8 +152,15 @@ function CreateDialog({ onClose }: { onClose: () => void }) {
             <option value="PCS">Pieces (pcs)</option>
           </Select>
         </Field>
+        {multi && !branches.current && (
+          <BranchSelect id="ing-branch" label="Opening stock goes to" value={branchId} onChange={setBranchId} branches={branches} />
+        )}
         <div className="grid grid-cols-2 gap-4">
-          <Field label={`Opening stock (${BASE_UNIT_LABEL[v.unit]})`} htmlFor="ing-stock" error={fe.initialStock}>
+          <Field
+            label={`Opening stock${multi ? ` at ${branches.branches.find((b) => b.id === branchId)?.name}` : ""} (${BASE_UNIT_LABEL[v.unit]})`}
+            htmlFor="ing-stock"
+            error={fe.initialStock}
+          >
             <Input
               id="ing-stock"
               inputMode="decimal"
@@ -132,7 +169,12 @@ function CreateDialog({ onClose }: { onClose: () => void }) {
               onChange={(e) => setV({ ...v, initialStock: e.target.value })}
             />
           </Field>
-          <Field label={`Low-stock threshold (${BASE_UNIT_LABEL[v.unit]})`} htmlFor="ing-low" error={fe.lowStockThreshold}>
+          <Field
+            label={`Low-stock threshold (${BASE_UNIT_LABEL[v.unit]})`}
+            htmlFor="ing-low"
+            error={fe.lowStockThreshold}
+            hint={multi ? "For every branch" : undefined}
+          >
             <Input
               id="ing-low"
               inputMode="decimal"
@@ -169,8 +211,10 @@ function CreateDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function EditDialog({ ingredient, onClose }: { ingredient: IngredientRow; onClose: () => void }) {
+function EditDialog({ ingredient, branches, onClose }: { ingredient: IngredientRow; branches: BranchChoice; onClose: () => void }) {
   const toast = useToast();
+  const multi = branches.branches.length > 1;
+  const here = branches.branches.find((b) => b.id === branches.current)?.name;
   const [v, setV] = useState({
     name: ingredient.name,
     sku: ingredient.sku ?? "",
@@ -184,7 +228,12 @@ function EditDialog({ ingredient, onClose }: { ingredient: IngredientRow; onClos
   const unit = BASE_UNIT_LABEL[ingredient.unit];
 
   return (
-    <Dialog open onClose={onClose} title={`Edit ${ingredient.name}`} description={`Base unit: ${unit}. Use Stock to change quantities.`}>
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Edit ${ingredient.name}`}
+      description={`Base unit: ${unit}. Use Stock to change quantities.${multi ? " Name, SKU, cost and active apply to every branch." : ""}`}
+    >
       <form
         className="space-y-4 text-left"
         onSubmit={(e) => {
@@ -211,7 +260,12 @@ function EditDialog({ ingredient, onClose }: { ingredient: IngredientRow; onClos
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-4">
-          <Field label={`Low-stock threshold (${unit})`} htmlFor="ed-low" error={fe.lowStockThreshold}>
+          <Field
+            label={`Low-stock threshold (${unit})`}
+            htmlFor="ed-low"
+            error={fe.lowStockThreshold}
+            hint={multi ? (here ? `At ${here} only` : "Sets every branch") : undefined}
+          >
             <Input
               id="ed-low"
               inputMode="decimal"
@@ -253,8 +307,11 @@ function EditDialog({ ingredient, onClose }: { ingredient: IngredientRow; onClos
   );
 }
 
-function StockDialog({ ingredient, onClose }: { ingredient: IngredientRow; onClose: () => void }) {
+function StockDialog({ ingredient, branches, onClose }: { ingredient: IngredientRow; branches: BranchChoice; onClose: () => void }) {
   const toast = useToast();
+  const multi = branches.branches.length > 1;
+  const [branchId, setBranchId] = useState(branches.current ?? branches.hqId);
+  const branchName = branches.branches.find((b) => b.id === branchId)?.name;
   const units = INPUT_UNITS[ingredient.unit];
   const [kind, setKind] = useState<"RESTOCK" | "DEDUCT">("RESTOCK");
   const [quantity, setQuantity] = useState("");
@@ -269,7 +326,7 @@ function StockDialog({ ingredient, onClose }: { ingredient: IngredientRow; onClo
       onClose={onClose}
       width="sm"
       title={`Adjust stock · ${ingredient.name}`}
-      description={`Current: ${formatQty(ingredient.currentStock, ingredient.unit)}`}
+      description={`${multi ? `${branchName} — current` : "Current"}: ${formatQty(ingredient.stockByBranch[branchId] ?? "0", ingredient.unit)}`}
     >
       <form
         className="space-y-4 text-left"
@@ -280,15 +337,16 @@ function StockDialog({ ingredient, onClose }: { ingredient: IngredientRow; onClo
             return;
           }
           startTransition(async () => {
-            const res = await adjustStockAction({ ingredientId: ingredient.id, kind, quantity, inputUnit, reason });
+            const res = await adjustStockAction({ ingredientId: ingredient.id, kind, quantity, inputUnit, reason, branchId });
             if (res.ok) {
-              toast(`${ingredient.name}: now ${formatQty(res.data.balanceAfter, ingredient.unit)}`);
+              toast(`${ingredient.name}${multi ? ` at ${res.data.branch}` : ""}: now ${formatQty(res.data.balanceAfter, ingredient.unit)}`);
               onClose();
             } else setError(res.error);
           });
         }}
       >
         <FormError message={error} />
+        {multi && !branches.current && <BranchSelect id="adj-branch" label="Branch" value={branchId} onChange={setBranchId} branches={branches} />}
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[4px] border border-line-strong bg-line-strong">
           {(["RESTOCK", "DEDUCT"] as const).map((k) => (
             <button

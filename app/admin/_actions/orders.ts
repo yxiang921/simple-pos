@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireAdmin } from "@/lib/auth/session";
+import { assertOrder, requireContext } from "@/lib/tenant";
 import { runAction } from "@/lib/action-utils";
 import { cancelOrder, setPaymentStatus, updateOrderStatus } from "@/lib/services/orders";
 import { cancelOrderSchema, idString } from "@/lib/validation";
@@ -17,28 +17,32 @@ function revalidate() {
 }
 
 export async function updateOrderStatusAction(orderId: string, status: string) {
-  await requireAdmin();
+  const ctx = await requireContext();
   return runAction(async () => {
     const input = statusSchema.parse({ orderId, status });
+    await assertOrder(ctx, input.orderId);
     await updateOrderStatus(input.orderId, input.status);
     revalidate();
   });
 }
 
 export async function cancelOrderAction(orderId: string, reason: string) {
-  const admin = await requireAdmin();
+  const ctx = await requireContext();
   return runAction(async () => {
     const input = cancelOrderSchema.parse({ orderId, reason });
-    const res = await cancelOrder(input.orderId, input.reason, admin.email);
+    await assertOrder(ctx, input.orderId);
+    const res = await cancelOrder(input.orderId, input.reason, ctx.admin.email);
     revalidate();
     return res;
   });
 }
 
 export async function setPaymentStatusAction(orderId: string, paid: boolean) {
-  await requireAdmin();
+  const ctx = await requireContext();
   return runAction(async () => {
-    await setPaymentStatus(idString.parse(orderId), z.boolean().parse(paid));
+    const id = idString.parse(orderId);
+    await assertOrder(ctx, id);
+    await setPaymentStatus(id, z.boolean().parse(paid));
     revalidate();
   });
 }

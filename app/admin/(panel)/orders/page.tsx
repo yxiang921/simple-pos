@@ -8,7 +8,9 @@ import { Badge, EmptyState, PageHeader, Panel, Table, TD, TH, THead, TR } from "
 import { Input } from "@/components/ui/form";
 import { buttonClass } from "@/components/ui/button";
 import { Pagination, readPaging } from "@/components/ui/pagination";
-import { dayRangeUtc, DEFAULT_TZ } from "@/lib/time";
+import { dayRangeUtc } from "@/lib/time";
+import { branchFilter, requireContext } from "@/lib/tenant";
+import { switchHref } from "@/lib/links";
 import { normalizeTableNumber } from "@/lib/floor";
 import { tableNumberVariants } from "@/lib/services/floor";
 import { X } from "lucide-react";
@@ -27,6 +29,9 @@ const isoDay = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.t
 
 export default async function OrdersPage({ searchParams }: PageProps<"/admin/orders">) {
   const sp = await searchParams;
+  const ctx = await requireContext();
+  const scope = branchFilter(ctx);
+  const overview = !ctx.branch;
   // Opens on "All" so every record (including the order history) is visible; "Active" is the kitchen queue.
   const filter = typeof sp.status === "string" && FILTERS.some((f) => f.key === sp.status) ? sp.status : "ALL";
   const q = typeof sp.q === "string" ? sp.q.trim().slice(0, 60) : "";
@@ -39,14 +44,18 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
   const table = typeof sp.table === "string" ? sp.table.trim().slice(0, 20) : "";
   const tableKey = table === "none" ? "none" : normalizeTableNumber(table);
 
-  const [settings, floorTables, variants] = await Promise.all([
-    prisma.storeSetting.findUnique({ where: { id: 1 }, select: { timezone: true } }),
-    prisma.floorObject.findMany({ where: { kind: "TABLE" }, select: { tableNumber: true, label: true } }),
-    tableKey && tableKey !== "none" ? tableNumberVariants(tableKey) : Promise.resolve([] as string[]),
+  const [floorTables, variants] = await Promise.all([
+    prisma.floorObject.findMany({ where: { merchantId: ctx.merchant.id, kind: "TABLE" }, select: { tableNumber: true, label: true } }),
+    tableKey && tableKey !== "none" ? tableNumberVariants(scope, tableKey) : Promise.resolve([] as string[]),
   ]);
   const onFloor = new Map(floorTables.map((t) => [t.tableNumber!, t.label]));
-  const tz = settings?.timezone || DEFAULT_TZ;
-  const base: Prisma.OrderWhereInput = hideSim ? { isSimulated: false } : {};
+  const tz = ctx.settings.timezone;
+  // The floor shows one branch: from "All branches", a table link first switches to the order's branch.
+  const floorHref = (table: string, branchId: string) => {
+    const path = `/admin/floor?table=${encodeURIComponent(table)}`;
+    return overview ? switchHref(branchId, path) : path;
+  };
+  const base: Prisma.OrderWhereInput = { ...scope, ...(hideSim ? { isSimulated: false } : {}) };
   if (from || to) {
     base.createdAt = {
       ...(from ? { gte: dayRangeUtc(from, tz).start } : {}),
@@ -81,6 +90,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
     include: {
       items: { orderBy: { menuItemNameSnapshot: "asc" } },
       ingredients: { orderBy: { ingredientNameSnapshot: "asc" } },
+      branch: { select: { id: true, name: true } },
     },
   });
   const countBy = Object.fromEntries(counts.map((c) => [c.status, c._count])) as Record<string, number>;
@@ -97,7 +107,14 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
 
   return (
     <>
-      <PageHeader title="Orders" description="All orders, newest first — new orders and status changes appear automatically. Use Active for the kitchen queue." />
+      <PageHeader
+        title="Orders"
+        description={
+          overview
+            ? "Orders from every branch, newest first. Choose a branch at the top to see only its orders."
+            : `${ctx.branch!.name}: all orders, newest first — new orders and status changes appear automatically. Use Active for the kitchen queue.`
+        }
+      />
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-px overflow-hidden rounded-[4px] border border-line-strong bg-line-strong">
@@ -146,7 +163,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
               <X className="size-3.5" />
             </Link>
           </span>
-          {tableKey !== "none" && onFloor.has(tableKey) && (
+          {tableKey !== "none" && onFloor.has(tableKey) && !overview && (
             <Link href={`/admin/floor?table=${encodeURIComponent(tableKey)}`} className="text-primary hover:underline">
               Show on floor
             </Link>
@@ -168,6 +185,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
             <THead>
               <tr>
                 <TH>Order</TH>
+                {overview && <TH>Branch</TH>}
                 <TH>Customer</TH>
                 <TH>Table</TH>
                 <TH>Items</TH>
@@ -185,10 +203,17 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
                   orderNumber: o.orderNumber,
                   customerName: o.customerName,
                   tableNumber: o.tableNumber,
-                  floorTable: (() => {
+                  floorHref: (() => {
                     const key = normalizeTableNumber(o.tableNumber);
-                    return key && onFloor.has(key) ? key : null;
+                    return key && onFloor.has(key) ? floorHref(key, o.branchId) : null;
                   })(),
+                  ordersHref: (() => {
+                    const key = normalizeTableNumber(o.tableNumber);
+                    if (!key) return null;
+                    const path = `/admin/orders?table=${encodeURIComponent(key)}`;
+                    return overview ? switchHref(o.branchId, path) : path;
+                  })(),
+                  branchName: o.branch.name,
                   status: o.status,
                   paymentStatus: o.paymentStatus,
                   totalAmount: o.totalAmount.toFixed(2),
@@ -212,15 +237,16 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
                 return (
                   <TR key={o.id} className={o.status === "CANCELLED" ? "text-muted" : undefined}>
                     <TD className="tabular font-medium">{formatOrderNumber(o.orderNumber)}</TD>
+                    {overview && <TD className="whitespace-nowrap text-muted">{o.branch.name}</TD>}
                     <TD className="max-w-[160px] truncate">{o.customerName}</TD>
                     <TD>
                       {(() => {
                         const key = normalizeTableNumber(o.tableNumber);
                         if (!key) return <span className="text-muted">—</span>;
                         return onFloor.has(key) ? (
-                          <Link href={`/admin/floor?table=${encodeURIComponent(key)}`} className="text-primary hover:underline" title="Show on floor">
+                          <a href={floorHref(key, o.branchId)} className="text-primary hover:underline" title="Show on floor">
                             {o.tableNumber}
-                          </Link>
+                          </a>
                         ) : (
                           <span title="Not on the floor plan">{o.tableNumber}</span>
                         );

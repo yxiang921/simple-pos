@@ -31,7 +31,7 @@ export function StoreForm({
   return (
     <form action={action} className="space-y-4 p-4">
       <FormError message={state && !state.ok ? state.error : null} />
-      <Field label="Store name" htmlFor="storeName" error={fe?.storeName} hint="Shown on the guest menu and receipts.">
+      <Field label="Business name" htmlFor="storeName" error={fe?.storeName} hint="Shown on the guest menu of every branch.">
         <Input id="storeName" name="storeName" defaultValue={storeName} maxLength={80} />
       </Field>
       <div className="grid grid-cols-3 gap-3">
