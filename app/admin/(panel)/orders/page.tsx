@@ -4,7 +4,7 @@ import { clsx } from "clsx";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { formatDateTime, formatOrderNumber, formatRM, ORDER_STATUS_LABEL, ORDER_STATUSES, type BaseUnitCode, type OrderStatusCode } from "@/lib/format";
-import { Badge, EmptyState, PageHeader, Panel, Table, TD, TH, THead, TR } from "@/components/ui/misc";
+import { Badge, EmptyState, PageHeader, Panel, segmentClass, segmentedClass, Table, TD, TH, THead, TR } from "@/components/ui/misc";
 import { Input } from "@/components/ui/form";
 import { buttonClass } from "@/components/ui/button";
 import { Pagination, readPaging } from "@/components/ui/pagination";
@@ -117,20 +117,17 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
       />
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-px overflow-hidden rounded-[4px] border border-line-strong bg-line-strong">
+        <div className={segmentedClass}>
           {FILTERS.map((f) => {
             const n = f.key === "ACTIVE" ? activeCount : f.key === "ALL" ? allCount : countBy[f.key];
             return (
               <Link
                 key={f.key}
                 href={href({ status: f.key })}
-                className={clsx(
-                  "flex h-8 items-center gap-1.5 px-3 text-[13px]",
-                  filter === f.key ? "bg-primary text-white" : "bg-surface text-ink hover:bg-hover",
-                )}
+                className={segmentClass(filter === f.key)}
               >
                 {f.label}
-                <span className={clsx("tabular text-[12px]", filter === f.key ? "text-white/80" : "text-muted")}>{(n ?? 0).toLocaleString()}</span>
+                <span className={clsx("tabular text-[11.5px]", filter === f.key ? "text-primary" : "text-subtle")}>{(n ?? 0).toLocaleString()}</span>
               </Link>
             );
           })}
@@ -157,7 +154,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
 
       {tableKey && (
         <div className="mb-2 flex flex-wrap items-center gap-2 text-[13px]">
-          <span className="inline-flex h-7 items-center gap-1.5 rounded-[4px] border border-primary bg-primary-soft px-2 font-medium text-primary">
+          <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-primary/30 bg-primary-soft px-3 font-medium text-primary">
             {tableKey === "none" ? "No table (takeaway / counter)" : (onFloor.get(tableKey) ?? `Table ${tableKey}`)}
             <Link href={href({ table: undefined })} aria-label="Clear table filter" className="hover:text-primary-hover">
               <X className="size-3.5" />

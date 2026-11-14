@@ -12,13 +12,13 @@ export function CartButton() {
   return (
     <Link
       href={`${base}/cart`}
-      className="relative flex h-9 items-center gap-2 rounded-[4px] border border-line-strong px-3 text-[13px] font-medium hover:bg-hover"
+      className="press relative flex h-9 items-center gap-2 rounded-full border border-line bg-surface/70 px-3.5 text-[13px] font-medium shadow-[0_1px_2px_rgb(0_0_0/0.05)] hover:border-line-strong dark:bg-white/[0.06]"
       aria-label={`Cart, ${count} item${count === 1 ? "" : "s"}`}
     >
       <ShoppingBag className="size-4" />
       <span>Cart</span>
       {count > 0 && (
-        <span className="tabular min-w-5 rounded-[3px] bg-primary px-1 text-center text-[12px] font-semibold leading-5 text-white">
+        <span key={count} className="animate-pop tabular min-w-5 rounded-full bg-primary px-1.5 text-center text-[12px] font-semibold leading-5 text-white shadow-[0_2px_8px_-2px_var(--primary-glow)]">
           {count}
         </span>
       )}

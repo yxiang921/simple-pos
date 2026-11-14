@@ -3,24 +3,53 @@
 import * as THREE from "three";
 import { chairSpots, FLOOR_COLORS, type FloorObjectData } from "@/lib/floor";
 
-export const PALETTE = {
-  background: "#F4F3EF",
-  floor: "#E8E5DD",
-  wall: "#F7F6F3",
+const LIGHT_PALETTE = {
+  background: "#F4F2EE",
+  floor: "#ECE7DF",
+  wall: "#FAF8F5",
   edge: "#1F1F1F",
-  wood: "#CDB89C",
-  woodTop: "#A88E6E",
-  barWood: "#8F7358",
+  wood: "#D6BE9F",
+  woodTop: "#B08F69",
+  barWood: "#93704F",
   stainless: "#CBD0D4",
   dark: "#3B3D40",
   frame: "#5D5F62",
-  kitchenFloor: "#D6D8D5",
+  kitchenFloor: "#D9DAD7",
   fridge: "#EEF0F1",
   mat: "#4A4B4D",
-  pot: "#B9A388",
+  pot: "#C09C78",
   leaves: "#7D8E6C",
-  selection: "#285943",
+  selection: "#CC7736",
+  gridMajor: "#BDB6A9",
+  gridMinor: "#D9D3C8",
 };
+
+const DARK_PALETTE: typeof LIGHT_PALETTE = {
+  background: "#141416",
+  floor: "#2A2826",
+  wall: "#3A3734",
+  edge: "#000000",
+  wood: "#8C6F52",
+  woodTop: "#6F553D",
+  barWood: "#5B4430",
+  stainless: "#7E848B",
+  dark: "#1C1D1F",
+  frame: "#4A4C50",
+  kitchenFloor: "#333537",
+  fridge: "#5C6064",
+  mat: "#18191A",
+  pot: "#76604A",
+  leaves: "#5B7650",
+  selection: "#E08A48",
+  gridMajor: "#4A4642",
+  gridMinor: "#363330",
+};
+
+/** Colours of the current theme (switched by the engine when light / dark changes). */
+export let PALETTE = LIGHT_PALETTE;
+export function setPalette(dark: boolean) {
+  PALETTE = dark ? DARK_PALETTE : LIGHT_PALETTE;
+}
 
 /** Materials shared by every object; disposed with the engine, not per object. */
 export class SharedMaterials {

@@ -6,6 +6,7 @@ import { getGuestShop, guestPath } from "@/lib/tenant";
 import { CartButton } from "./cart-button";
 import { ShopProvider } from "./shop-context";
 import { GuestLiveUpdates } from "@/components/live-updates";
+import { ThemeToggle } from "@/components/theme";
 
 export async function generateMetadata({ params }: LayoutProps<"/s/[merchant]/[branch]">): Promise<Metadata> {
   const { merchant, branch } = await params;
@@ -25,12 +26,12 @@ export default async function ShopLayout({ children, params }: LayoutProps<"/s/[
 
   return (
     <ShopProvider value={{ base, branchId: shop.branch.id }}>
-      <div className="min-h-dvh bg-surface sm:bg-bg">
+      <div className="min-h-dvh">
         <GuestLiveUpdates base={base} />
-        <header className="sticky top-0 z-30 border-b border-line bg-surface">
+        <header className="glass sticky top-0 z-30 border-b border-line">
           <div className="mx-auto flex h-14 max-w-3xl items-center justify-between px-4">
             <Link href={base} className="flex min-w-0 items-center gap-2.5">
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-[4px] bg-primary text-[14px] font-semibold text-white">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-[11px] bg-gradient-to-br from-[#e39a5f] via-primary to-[#9c4f17] text-[15px] font-bold text-white shadow-[0_6px_18px_-6px_var(--primary-glow),inset_0_1px_0_rgb(255_255_255/0.35)]">
                 {storeName.slice(0, 1)}
               </span>
               <span className="min-w-0 leading-tight">
@@ -38,7 +39,12 @@ export default async function ShopLayout({ children, params }: LayoutProps<"/s/[
                 <span className="block truncate text-[12px] text-muted">{shop.branch.name} · Order at your table</span>
               </span>
             </Link>
-            <CartButton />
+            <div className="flex items-center gap-2">
+              <span className="hidden sm:block">
+                <ThemeToggle />
+              </span>
+              <CartButton />
+            </div>
           </div>
         </header>
         {!shop.settings.acceptingOrders && (

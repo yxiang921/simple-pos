@@ -31,14 +31,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             key={t.id}
             role={t.tone === "error" ? "alert" : "status"}
             className={clsx(
-              "pointer-events-auto flex items-start gap-2 rounded-[4px] border bg-surface px-3 py-2.5 text-[13px] shadow-[0_4px_12px_rgb(0_0_0/0.08)]",
-              t.tone === "error" ? "border-danger/40" : "border-line-strong",
+              "glass-strong shadow-pop animate-slide-in pointer-events-auto flex items-start gap-2.5 rounded-[16px] border px-4 py-3 text-[13px]",
+              t.tone === "error" ? "border-danger/30" : "border-line",
             )}
           >
             {t.tone === "error" ? (
               <AlertCircle className="mt-px size-4 shrink-0 text-danger" />
             ) : (
-              <CheckCircle2 className="mt-px size-4 shrink-0 text-primary" />
+              <CheckCircle2 className="mt-px size-4 shrink-0 text-success" />
             )}
             <span className="flex-1">{t.message}</span>
             <button

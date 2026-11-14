@@ -48,7 +48,7 @@ export function Pagination({
   const pages = Math.max(1, Math.ceil(total / size));
   const from = total === 0 ? 0 : (page - 1) * size + 1;
   const to = Math.min(total, page * size);
-  const btn = "inline-flex h-8 min-w-8 items-center justify-center rounded-[4px] border px-2 text-[13px] tabular";
+  const btn = "press inline-flex h-8 min-w-8 items-center justify-center rounded-full border px-2.5 text-[13px] tabular";
 
   return (
     <nav aria-label="Pagination" className="mt-3 flex flex-wrap items-center justify-between gap-3 text-[13px]">
@@ -64,7 +64,7 @@ export function Pagination({
               key={s}
               href={href({ page: 1, size: s })}
               aria-current={s === size ? "true" : undefined}
-              className={clsx(btn, s === size ? "border-primary bg-primary-soft font-medium text-primary" : "border-line-strong bg-surface text-ink hover:bg-hover")}
+              className={clsx(btn, s === size ? "border-primary/40 bg-primary-soft font-semibold text-primary" : "border-line bg-surface/70 text-ink hover:bg-hover dark:bg-white/[0.05]")}
             >
               {s}
             </Link>
@@ -74,7 +74,7 @@ export function Pagination({
         {pages > 1 && (
           <div className="flex items-center gap-1">
             {page > 1 ? (
-              <Link href={href({ page: page - 1 })} className={clsx(btn, "border-line-strong bg-surface hover:bg-hover")} aria-label="Previous page">
+              <Link href={href({ page: page - 1 })} className={clsx(btn, "border-line bg-surface/70 hover:bg-hover dark:bg-white/[0.05]")} aria-label="Previous page">
                 <ChevronLeft className="size-4" />
               </Link>
             ) : (
@@ -92,14 +92,14 @@ export function Pagination({
                   key={p}
                   href={href({ page: p })}
                   aria-current={p === page ? "page" : undefined}
-                  className={clsx(btn, p === page ? "border-primary bg-primary text-white" : "border-line-strong bg-surface text-ink hover:bg-hover")}
+                  className={clsx(btn, p === page ? "btn-primary border-primary bg-primary font-semibold text-white" : "border-line bg-surface/70 text-ink hover:bg-hover dark:bg-white/[0.05]")}
                 >
                   {p.toLocaleString()}
                 </Link>
               ),
             )}
             {page < pages ? (
-              <Link href={href({ page: page + 1 })} className={clsx(btn, "border-line-strong bg-surface hover:bg-hover")} aria-label="Next page">
+              <Link href={href({ page: page + 1 })} className={clsx(btn, "border-line bg-surface/70 hover:bg-hover dark:bg-white/[0.05]")} aria-label="Next page">
                 <ChevronRight className="size-4" />
               </Link>
             ) : (
@@ -123,7 +123,7 @@ export function Pagination({
               min={1}
               max={pages}
               placeholder={String(page)}
-              className="h-8 w-20 rounded-[4px] border border-line-strong bg-surface px-2 text-[13px] tabular"
+              className="h-8 w-20 rounded-full border border-line-strong bg-surface/80 px-3 text-[13px] tabular focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/20 dark:bg-white/[0.05]"
             />
           </form>
         )}

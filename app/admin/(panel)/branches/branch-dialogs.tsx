@@ -43,7 +43,7 @@ export function CopyLink({ path, disabled }: { path: string; disabled?: boolean 
       <code className="max-w-[220px] truncate text-[12px] text-ink">{path}</code>
       <button
         type="button"
-        className="flex size-7 items-center justify-center rounded-[4px] text-muted hover:bg-hover hover:text-ink"
+        className="press flex size-7 items-center justify-center rounded-full text-muted hover:bg-hover hover:text-ink"
         title="Copy full link"
         aria-label="Copy link"
         onClick={async () => {
@@ -55,7 +55,7 @@ export function CopyLink({ path, disabled }: { path: string; disabled?: boolean 
         {copied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
       </button>
       {!disabled && (
-        <a href={path} target="_blank" rel="noreferrer" className="flex size-7 items-center justify-center rounded-[4px] text-muted hover:bg-hover hover:text-ink" title="Open guest menu">
+        <a href={path} target="_blank" rel="noreferrer" className="press flex size-7 items-center justify-center rounded-full text-muted hover:bg-hover hover:text-ink" title="Open guest menu">
           <ExternalLink className="size-3.5" />
         </a>
       )}

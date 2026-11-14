@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { clsx } from "clsx";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Building, Carrot, ChevronLeft, ChevronRight, PiggyBank, ShoppingBag } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { monthlyEquivalent, monthSummary } from "@/lib/services/expenses";
 import { localDate } from "@/lib/time";
@@ -14,7 +14,7 @@ import {
   type ExpenseFrequencyCode,
 } from "@/lib/expense-labels";
 import { buttonClass } from "@/components/ui/button";
-import { EmptyState, PageHeader, Panel, PanelHeader, Table, TD, TH, THead, TR } from "@/components/ui/misc";
+import { EmptyState, PageHeader, Panel, PanelHeader, StatGrid, Table, TD, TH, THead, TR } from "@/components/ui/misc";
 import { ExpenseRowActions, ExpenseToolbar, type ExpenseRow } from "./expense-dialogs";
 
 export const metadata: Metadata = { title: "Costs" };
@@ -138,7 +138,7 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
           <Link href={q({ month: shiftMonth(month, -1) })} className={buttonClass("secondary", "icon")} aria-label="Previous month">
             <ChevronLeft />
           </Link>
-          <span className="min-w-[150px] text-center text-[14px] font-semibold">{monthLabel}</span>
+          <span className="min-w-[160px] text-center text-[15px] font-semibold tracking-[-0.01em]">{monthLabel}</span>
           <Link
             href={q({ month: shiftMonth(month, 1) })}
             className={clsx(buttonClass("secondary", "icon"), month >= thisMonth && "pointer-events-none opacity-40")}
@@ -150,15 +150,16 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
         </div>
       </div>
 
-      <div className="mb-5 grid grid-cols-2 border-l border-t border-line bg-surface lg:grid-cols-4">
-        {tiles.map((t) => (
-          <div key={t.label} className="border-b border-r border-line px-4 py-3.5">
-            <p className="text-[12px] font-medium uppercase tracking-[0.03em] text-muted">{t.label}</p>
-            <p className={clsx("tabular mt-1.5 text-[22px] font-semibold leading-none", t.danger && "text-danger")}>{t.value}</p>
-            <p className={clsx("mt-1.5 text-[12px]", t.warn ? "text-warning" : "text-muted")}>{t.sub}</p>
-          </div>
-        ))}
-      </div>
+      <StatGrid
+        stats={tiles.map((t, i) => ({
+          label: t.label,
+          value: t.value,
+          sub: "warn" in t && t.warn ? <span className="text-warning">{t.sub}</span> : t.sub,
+          icon: [<ShoppingBag key="s" />, <Carrot key="c" />, <Building key="o" />, <PiggyBank key="p" />][i],
+          tone: (["brand", "warning", "info", "success"] as const)[i],
+          valueTone: "danger" in t && t.danger ? "danger" : undefined,
+        }))}
+      />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
         <Panel>

@@ -136,7 +136,7 @@ function ExpenseDialog({ expense, today, onClose }: { expense: ExpenseRow | null
                 key={p.label}
                 type="button"
                 onClick={() => setV((s) => ({ ...s, name: p.name, category: p.category, frequency: p.frequency }))}
-                className="rounded-[4px] border border-line-strong px-2 py-1 text-[12px] hover:bg-hover"
+                className="press rounded-full border border-line-strong px-2.5 py-1 text-[12px] hover:bg-hover"
               >
                 {p.label}
               </button>

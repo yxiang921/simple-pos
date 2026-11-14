@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { clsx } from "clsx";
+import { segmentClass, segmentedClass } from "@/components/ui/misc";
 
 export function MenuTabs({ active }: { active: "items" | "categories" }) {
   const tabs = [
@@ -7,16 +7,9 @@ export function MenuTabs({ active }: { active: "items" | "categories" }) {
     { key: "categories", label: "Categories", href: "/admin/menu/categories" },
   ];
   return (
-    <div className="mb-4 flex gap-5 border-b border-line">
+    <div className={`${segmentedClass} mb-4`}>
       {tabs.map((t) => (
-        <Link
-          key={t.key}
-          href={t.href}
-          className={clsx(
-            "-mb-px border-b-2 pb-2 text-[13px] font-medium",
-            active === t.key ? "border-primary text-primary" : "border-transparent text-muted hover:text-ink",
-          )}
-        >
+        <Link key={t.key} href={t.href} className={segmentClass(active === t.key)}>
           {t.label}
         </Link>
       ))}

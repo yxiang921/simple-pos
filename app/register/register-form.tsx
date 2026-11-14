@@ -59,7 +59,7 @@ export function RegisterForm() {
           error={fe?.slug}
           hint={
             slugValid && available !== null ? (
-              <span className={clsx("inline-flex items-center gap-1", available ? "text-primary" : "text-danger")}>
+              <span className={clsx("inline-flex items-center gap-1 font-medium", available ? "text-success" : "text-danger")}>
                 {available ? <Check className="size-3.5" /> : <X className="size-3.5" />}
                 {available ? "Available" : "Already taken"}
               </span>
@@ -68,8 +68,8 @@ export function RegisterForm() {
             )
           }
         >
-          <div className="flex items-stretch overflow-hidden rounded-[4px] border border-line-strong focus-within:border-primary">
-            <span className="flex items-center border-r border-line bg-[#fafaf8] px-2.5 text-[13px] text-muted">/s/</span>
+          <div className="flex items-stretch overflow-hidden rounded-[10px] border border-line-strong bg-surface/80 transition-[border-color,box-shadow] duration-200 focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/20 dark:bg-white/[0.05]">
+            <span className="flex items-center border-r border-line bg-fill px-3 text-[13px] text-muted">/s/</span>
             <input
               id="slug"
               name="slug"
@@ -80,7 +80,7 @@ export function RegisterForm() {
                 setAvailable(null);
                 setV({ ...v, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") });
               }}
-              className="h-9 min-w-0 flex-1 bg-surface px-2.5 text-[14px] outline-none"
+              className="h-9 min-w-0 flex-1 bg-transparent px-3 text-[14px] outline-none"
               placeholder="kopi-co"
               aria-invalid={!!fe?.slug}
             />
@@ -90,16 +90,21 @@ export function RegisterForm() {
 
       <fieldset className="space-y-3">
         <legend className="mb-2 text-[12px] font-semibold uppercase tracking-[0.04em] text-muted">Outlets</legend>
-        <div className="grid gap-px overflow-hidden rounded-[4px] border border-line-strong bg-line-strong sm:grid-cols-2">
+        <div className="grid gap-2.5 sm:grid-cols-2">
           {[
             { value: false, title: "Single outlet", text: "One shop." },
             { value: true, title: "Headquarters with branches", text: "Shared menu, separate orders and stock per branch." },
           ].map((o) => (
             <label
               key={String(o.value)}
-              className={clsx("flex cursor-pointer gap-2.5 px-3 py-2.5", hasBranches === o.value ? "bg-primary-soft" : "bg-surface hover:bg-hover")}
+              className={clsx(
+                "press flex cursor-pointer gap-2.5 rounded-[14px] border px-3.5 py-3 transition-[border-color,background-color,box-shadow] duration-200",
+                hasBranches === o.value
+                  ? "border-primary/60 bg-primary-soft shadow-[0_0_0_4px_var(--primary-soft)]"
+                  : "border-line bg-surface/60 hover:border-line-strong dark:bg-white/[0.04]",
+              )}
             >
-              <input type="radio" name="_outlets" className="mt-0.5 accent-[#285943]" checked={hasBranches === o.value} onChange={() => setHasBranches(o.value)} />
+              <input type="radio" name="_outlets" className="mt-0.5 accent-[var(--primary)]" checked={hasBranches === o.value} onChange={() => setHasBranches(o.value)} />
               <span>
                 <span className="block text-[13px] font-medium">{o.title}</span>
                 <span className="block text-[12px] text-muted">{o.text}</span>
@@ -142,7 +147,7 @@ export function RegisterForm() {
         </Field>
       </fieldset>
 
-      <div className="rounded-[4px] border border-line bg-[#fafaf8] px-3 py-2.5">
+      <div className="rounded-[14px] border border-line bg-fill/60 px-3.5 py-3">
         <Checkbox
           name="sampleData"
           value="true"

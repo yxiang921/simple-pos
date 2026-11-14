@@ -140,7 +140,7 @@ function OrderViewDialog({ order, open, onClose }: { order: OrderDetail; open: b
           )}
         </div>
         {order.cancelReason && (
-          <p className="rounded-[4px] border border-line bg-[#fafaf8] px-3 py-2">
+          <p className="rounded-[12px] border border-danger/20 bg-danger-soft px-3 py-2">
             <span className="font-medium">Cancellation reason:</span> {order.cancelReason}
           </p>
         )}

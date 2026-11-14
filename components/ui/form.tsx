@@ -7,9 +7,10 @@ import { Loader2 } from "lucide-react";
 import { Button } from "./button";
 
 const control =
-  "rounded-[4px] border border-line-strong bg-surface px-2.5 text-[14px] text-ink placeholder:text-subtle " +
-  "focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 " +
-  "disabled:bg-hover disabled:text-muted aria-[invalid=true]:border-danger";
+  "rounded-[10px] border border-line-strong bg-surface/80 px-3 text-[14px] text-ink placeholder:text-subtle shadow-[inset_0_1px_2px_rgb(0_0_0/0.04)] " +
+  "transition-[border-color,box-shadow,background-color] duration-200 dark:bg-white/[0.05] " +
+  "hover:border-[color-mix(in_srgb,var(--line-strong),var(--ink)_15%)] focus:border-primary focus:bg-surface focus:outline-none focus:ring-4 focus:ring-primary/20 dark:focus:bg-white/[0.08] " +
+  "disabled:bg-fill disabled:text-muted aria-[invalid=true]:border-danger aria-[invalid=true]:ring-danger/15";
 
 /** Full width unless the caller sets an explicit width class. */
 const width = (className?: string) => (/(^|\s)(w-|min-w-|max-w-)/.test(className ?? "") ? undefined : "w-full");
@@ -29,7 +30,7 @@ export function Select({ className, children, ...props }: ComponentProps<"select
         control,
         width(className),
         "h-9 appearance-none bg-[length:16px] bg-[right_8px_center] bg-no-repeat pr-8",
-        "bg-[url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23666' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")]",
+        "bg-[url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23999' stroke-width='2.2'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E\")]",
         className,
       )}
       {...props}
@@ -77,7 +78,7 @@ export function Field({
 export function Checkbox({ label, className, ...props }: ComponentProps<"input"> & { label: ReactNode }) {
   return (
     <label className={clsx("inline-flex cursor-pointer items-center gap-2 text-[14px]", className)}>
-      <input type="checkbox" className="size-4 rounded-[3px] border-line-strong accent-primary" {...props} />
+      <input type="checkbox" className="size-4 rounded-[5px] border-line-strong accent-[var(--primary)]" {...props} />
       <span>{label}</span>
     </label>
   );
@@ -110,7 +111,7 @@ export function SubmitButton({
 export function FormError({ message }: { message?: string | null }) {
   if (!message) return null;
   return (
-    <div role="alert" className="rounded-[4px] border border-danger/30 bg-danger-soft px-3 py-2 text-[13px] text-danger">
+    <div role="alert" className="animate-pop rounded-[12px] border border-danger/25 bg-danger-soft px-3.5 py-2.5 text-[13px] text-danger">
       {message}
     </div>
   );

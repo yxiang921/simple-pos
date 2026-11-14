@@ -123,7 +123,7 @@ export function CartView({
         <p className="mt-1 text-[13px] text-muted">Browse the menu and add something you like.</p>
         <Link
           href={base}
-          className="mt-5 inline-flex h-11 items-center rounded-[4px] bg-primary px-5 text-[15px] font-semibold text-white hover:bg-primary-hover"
+          className="press btn-primary mt-5 inline-flex h-11 items-center rounded-full bg-primary px-6 text-[15px] font-semibold text-white hover:bg-primary-hover"
         >
           Browse menu
         </Link>
@@ -142,7 +142,7 @@ export function CartView({
       </div>
 
       <form onSubmit={submit} noValidate>
-        <section className="border-y border-line bg-surface sm:rounded-[6px] sm:border">
+        <section className="card animate-fade-up mx-3 overflow-hidden rounded-[22px] sm:mx-0">
           <ul className="divide-y divide-line">
             {rows.map((r) => (
               <li
@@ -179,7 +179,7 @@ export function CartView({
                     <button
                       type="button"
                       onClick={() => cart.remove(r.menuItemId)}
-                      className="inline-flex h-8 items-center gap-1 rounded-[4px] px-2 text-[13px] text-muted hover:bg-hover hover:text-danger"
+                      className="press inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-[13px] text-muted hover:bg-danger-soft hover:text-danger"
                     >
                       <Trash2 className="size-3.5" /> Remove
                     </button>
@@ -201,23 +201,23 @@ export function CartView({
           </div>
         </section>
 
-        <section className="mt-3 border-y border-line bg-surface px-4 py-4 sm:rounded-[6px] sm:border">
+        <section className="card animate-fade-up mx-3 mt-4 rounded-[22px] px-5 py-5 [animation-delay:0.06s] sm:mx-0">
           <h2 className="mb-3 text-[14px] font-semibold">Your details</h2>
           {hydrated && <GuestDetails fieldErrors={fieldErrors} tables={tables} />}
         </section>
 
         {error && (
-          <div role="alert" className="mx-4 mt-3 rounded-[4px] border border-danger/30 bg-danger-soft px-3 py-2.5 text-[14px] text-danger sm:mx-0">
+          <div role="alert" className="animate-pop mx-3 mt-3 rounded-[16px] border border-danger/30 bg-danger-soft px-4 py-3 text-[14px] text-danger sm:mx-0">
             {error}
           </div>
         )}
 
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="glass fixed inset-x-0 bottom-0 z-30 border-t border-line p-3 pb-[max(0.9rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto max-w-3xl">
             <button
               type="submit"
               disabled={pending || blocked || !acceptingOrders || lines.length === 0}
-              className="flex h-12 w-full items-center justify-between rounded-[4px] bg-primary px-4 text-[15px] font-semibold text-white hover:bg-primary-hover disabled:bg-[#9db3a8]"
+              className="press btn-primary flex h-14 w-full items-center justify-between rounded-full bg-primary px-6 text-[16px] font-semibold text-white shadow-[0_18px_40px_-14px_var(--primary-glow)] hover:bg-primary-hover disabled:opacity-50"
             >
               <span className="flex items-center gap-2">
                 {pending && <Loader2 className="size-4 animate-spin" />}

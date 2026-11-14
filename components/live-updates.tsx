@@ -103,8 +103,10 @@ export function LiveIndicator({ className }: { className?: string }) {
             : "Connecting to live updates…"
       }
     >
-      <span className={clsx("inline-block size-2 rounded-full", state === "live" ? "bg-primary" : "bg-subtle")} />
-      <span className={state === "live" ? "text-primary" : "text-muted"}>
+      <span className={clsx("relative inline-flex size-2 rounded-full", state === "live" ? "bg-success text-success" : "bg-subtle")}>
+        {state === "live" && <span className="absolute inset-0 animate-ping rounded-full bg-success opacity-50 [animation-duration:2.2s]" />}
+      </span>
+      <span className={clsx("font-medium", state === "live" ? "text-success" : "text-muted")}>
         {state === "live" ? "Live" : state === "polling" ? `Every ${fallbackSeconds} s` : "Connecting…"}
       </span>
     </span>

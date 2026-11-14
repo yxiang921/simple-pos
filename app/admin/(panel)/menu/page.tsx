@@ -121,9 +121,9 @@ export default async function MenuPage({ searchParams }: PageProps<"/admin/menu"
                       <div className="flex items-center gap-3">
                         {m.imageUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={m.imageUrl} alt="" className="size-9 shrink-0 rounded-[4px] border border-line object-cover" />
+                          <img src={m.imageUrl} alt="" className="size-10 shrink-0 rounded-[10px] border border-line object-cover shadow-[0_2px_6px_-2px_rgb(0_0_0/0.2)]" />
                         ) : (
-                          <span className="flex size-9 shrink-0 items-center justify-center rounded-[4px] border border-line bg-[#fafaf8] text-[12px] font-medium text-subtle">
+                          <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br from-primary-soft to-fill text-[12px] font-semibold text-primary">
                             {m.name.slice(0, 2).toUpperCase()}
                           </span>
                         )}

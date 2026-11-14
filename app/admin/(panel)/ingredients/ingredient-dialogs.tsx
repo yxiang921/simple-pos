@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox, Field, FormError, Input, Select } from "@/components/ui/form";
 import { useToast } from "@/components/ui/toast";
+import { segmentClass, segmentedClass } from "@/components/ui/misc";
+import { clsx } from "clsx";
 import { BASE_UNIT_LABEL, COST_UNIT, INPUT_UNITS, formatQty, type BaseUnitCode } from "@/lib/format";
 import {
   adjustStockAction,
@@ -69,7 +71,7 @@ export function IngredientRowActions({ ingredient, branches }: { ingredient: Ing
       </Button>
       <Link
         href={`/admin/inventory/movements?ingredient=${ingredient.id}`}
-        className="flex size-7 items-center justify-center rounded-[4px] text-muted hover:bg-hover hover:text-ink"
+        className="press flex size-7 items-center justify-center rounded-full text-muted hover:bg-hover hover:text-ink"
         aria-label={`Movement history for ${ingredient.name}`}
         title="History"
       >
@@ -347,13 +349,13 @@ function StockDialog({ ingredient, branches, onClose }: { ingredient: Ingredient
       >
         <FormError message={error} />
         {multi && !branches.current && <BranchSelect id="adj-branch" label="Branch" value={branchId} onChange={setBranchId} branches={branches} />}
-        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[4px] border border-line-strong bg-line-strong">
+        <div className={clsx(segmentedClass, "grid w-full grid-cols-2")}>
           {(["RESTOCK", "DEDUCT"] as const).map((k) => (
             <button
               key={k}
               type="button"
               onClick={() => setKind(k)}
-              className={`h-8 text-[13px] ${kind === k ? "bg-primary text-white" : "bg-surface hover:bg-hover"}`}
+              className={clsx(segmentClass(kind === k), "justify-center")}
               aria-pressed={kind === k}
             >
               {k === "RESTOCK" ? "Restock (add)" : "Wastage / correction"}

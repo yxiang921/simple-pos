@@ -139,7 +139,7 @@ export function MenuItemForm({
               />
               {values.imageUrl && /^https?:\/\//.test(values.imageUrl) && (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={values.imageUrl} alt="" className="size-9 shrink-0 rounded-[4px] border border-line object-cover" />
+                <img src={values.imageUrl} alt="" className="size-10 shrink-0 rounded-[10px] border border-line object-cover" />
               )}
             </div>
           </Field>
@@ -192,7 +192,7 @@ export function MenuItemForm({
             </p>
           ) : (
             <div className="divide-y divide-line">
-              <div className="grid grid-cols-[minmax(0,1fr)_110px_84px_32px] gap-2 bg-[#fafaf8] px-4 py-2 text-[12px] font-medium uppercase tracking-[0.03em] text-muted">
+              <div className="grid grid-cols-[minmax(0,1fr)_110px_84px_32px] gap-2 bg-fill/60 px-4 py-2 text-[12px] font-medium uppercase tracking-[0.03em] text-muted">
                 <span>Ingredient</span>
                 <span>Quantity</span>
                 <span>Unit</span>
@@ -243,7 +243,7 @@ export function MenuItemForm({
                         type="button"
                         aria-label="Remove ingredient"
                         onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))}
-                        className="flex size-8 items-center justify-center rounded-[4px] text-muted hover:bg-danger-soft hover:text-danger"
+                        className="press flex size-8 items-center justify-center rounded-full text-muted hover:bg-danger-soft hover:text-danger"
                       >
                         <X className="size-4" />
                       </button>

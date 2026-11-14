@@ -8,7 +8,7 @@ import { stockStatus, type StockStatus } from "@/lib/services/inventory";
 import { COST_UNIT, formatDateTime, formatQty, formatQtyHint, formatRM, BASE_UNIT_LABEL, type BaseUnitCode } from "@/lib/format";
 import { Input } from "@/components/ui/form";
 import { buttonClass } from "@/components/ui/button";
-import { Badge, EmptyState, PageHeader, Panel, Table, TD, TH, THead, TR } from "@/components/ui/misc";
+import { Badge, EmptyState, PageHeader, Panel, segmentClass, segmentedClass, Table, TD, TH, THead, TR } from "@/components/ui/misc";
 import { IngredientToolbar, IngredientRowActions, type BranchChoice, type IngredientRow } from "./ingredient-dialogs";
 
 const ZERO = new Prisma.Decimal(0);
@@ -90,19 +90,16 @@ export default async function IngredientsPage({ searchParams }: PageProps<"/admi
       />
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-px overflow-hidden rounded-[4px] border border-line-strong bg-line-strong">
+        <div className={segmentedClass}>
           {FILTERS.map((f) => (
             <Link
               key={f.key}
               href={`/admin/ingredients?filter=${f.key}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
-              className={clsx(
-                "flex h-8 items-center gap-1.5 px-3 text-[13px]",
-                filter === f.key ? "bg-primary text-white" : "bg-surface text-ink hover:bg-hover",
-              )}
+              className={segmentClass(filter === f.key)}
             >
               {f.label}
               {f.key === "low" && lowCount > 0 && (
-                <span className={clsx("tabular text-[12px]", filter === f.key ? "text-white/80" : "text-warning")}>{lowCount}</span>
+                <span className="tabular rounded-full bg-warning-soft px-1.5 text-[11px] text-warning">{lowCount}</span>
               )}
             </Link>
           ))}

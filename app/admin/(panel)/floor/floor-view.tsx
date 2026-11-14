@@ -206,7 +206,7 @@ export function FloorView({
       />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="relative h-[calc(100dvh-178px)] min-h-[460px] overflow-hidden rounded-[6px] border border-line bg-[#F4F3EF]">
+        <div className="floor-stage card relative h-[calc(100dvh-200px)] min-h-[460px] overflow-hidden rounded-[22px]">
           {glError ? (
             <div className="flex h-full flex-col items-center justify-center px-6 text-center">
               <p className="text-[14px] font-medium">The 3D view isn&apos;t available on this device</p>
@@ -234,7 +234,7 @@ export function FloorView({
           )}
 
           {!glError && (
-            <div className="absolute left-3 top-3 z-10 flex flex-col overflow-hidden rounded-[4px] border border-line-strong bg-white">
+            <div className="glass-strong shadow-pop absolute left-3 top-3 z-10 flex flex-col gap-0.5 rounded-[14px] border border-line p-1">
               {TOOLS.map(({ action, label, icon: Icon }) => (
                 <button
                   key={action}
@@ -242,7 +242,7 @@ export function FloorView({
                   onClick={() => runTool(action)}
                   title={label}
                   aria-label={label}
-                  className="flex size-8 items-center justify-center border-b border-line text-ink last:border-b-0 hover:bg-hover"
+                  className="press flex size-8 items-center justify-center rounded-[10px] text-ink hover:bg-hover hover:text-primary"
                 >
                   <Icon className="size-4" />
                 </button>
@@ -251,14 +251,14 @@ export function FloorView({
           )}
 
           {mode === "edit" && !glError && (
-            <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-[4px] bg-white/90 px-2.5 py-1.5 text-[12px] text-muted">
+            <div className="glass pointer-events-none absolute bottom-3 left-3 z-10 rounded-full border border-line px-3 py-1.5 text-[12px] text-muted">
               Drag to move · <kbd className="font-sans font-semibold text-ink">R</kbd> rotate · <kbd className="font-sans font-semibold text-ink">Del</kbd> delete ·
               arrows nudge · right-drag pans
             </div>
           )}
 
           {mode === "view" && !glError && objects.length > 0 && (
-            <div className="pointer-events-none absolute bottom-3 left-3 z-10 hidden rounded-[4px] bg-white/90 px-2.5 py-1.5 text-[12px] text-muted md:block">
+            <div className="glass pointer-events-none absolute bottom-3 left-3 z-10 hidden rounded-full border border-line px-3 py-1.5 text-[12px] text-muted md:block">
               Drag to rotate · scroll to zoom · right-drag to pan · click a table for details
             </div>
           )}
@@ -277,8 +277,8 @@ export function FloorView({
           </div>
 
           {mode === "view" && objects.length === 0 && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#F4F3EF]/80">
-              <div className="max-w-sm rounded-[6px] border border-line bg-white p-5 text-center">
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-bg/50 backdrop-blur-sm">
+              <div className="glass-strong shadow-pop animate-pop max-w-sm rounded-[22px] border border-line p-6 text-center">
                 <p className="text-[15px] font-semibold">No floor plan yet</p>
                 <p className="mt-1 text-[13px] text-muted">
                   Start from a sample café layout (12 tables, counter, kitchen and pickup point) and adjust it, or draw your own.
@@ -356,9 +356,9 @@ function LivePanel({
 
       <div className="border-b border-line px-4 py-3">
         <div className="flex items-center gap-2 text-[12px] text-muted">
-          <span className="inline-block size-3 rounded-[2px]" style={{ background: heatColor(null) }} /> Free
+          <span className="inline-block size-3 rounded-full" style={{ background: heatColor(null) }} /> Free
           <span
-            className="ml-3 inline-block h-3 flex-1 rounded-[2px]"
+            className="ml-3 inline-block h-3 flex-1 rounded-full"
             style={{ background: `linear-gradient(90deg, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})` }}
           />
         </div>
@@ -384,7 +384,7 @@ function LivePanel({
               return (
                 <li key={o.id}>
                   <button type="button" onClick={() => onFocus(o.id)} className="flex w-full items-center gap-2.5 px-4 py-1.5 text-left hover:bg-hover">
-                    <span className="inline-block size-3 shrink-0 rounded-[2px]" style={{ background: heatColor(s.heat) }} />
+                    <span className="inline-block size-3 shrink-0 rounded-full" style={{ background: heatColor(s.heat) }} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] font-medium">{o.label}</span>
                       <span className="block truncate text-[12px] text-muted">
@@ -414,7 +414,7 @@ function LivePanel({
             onClick={() => pass && onFocus(pass.id)}
             className="mt-1 flex w-full items-center gap-2.5 text-left disabled:cursor-default"
           >
-            <span className="inline-block size-3 rounded-[2px]" style={{ background: heatColor(status.takeaway.heat) }} />
+            <span className="inline-block size-3 rounded-full" style={{ background: heatColor(status.takeaway.heat) }} />
             <span className="flex-1 text-[13px]">
               {status.takeaway.orders.length} order{status.takeaway.orders.length === 1 ? "" : "s"} waiting
             </span>
@@ -484,7 +484,7 @@ function ObjectTooltip({
 
   return (
     <div>
-      <div className="pointer-events-auto w-[300px] rounded-[6px] border border-line-strong bg-white text-left shadow-[0_6px_20px_rgb(0_0_0/0.12)]">
+      <div className="glass-strong shadow-pop animate-pop pointer-events-auto w-[310px] overflow-hidden rounded-[18px] border border-line text-left">
         <div className="flex items-start justify-between gap-2 border-b border-line px-3.5 py-2.5">
           <div className="min-w-0">
             <p className="truncate text-[14px] font-semibold">{object.label}</p>
@@ -501,7 +501,7 @@ function ObjectTooltip({
               ) : (
                 <Badge tone="warning">Waiting {formatAge(status!.oldestMs ?? 0)}</Badge>
               ))}
-            <button type="button" onClick={onClose} aria-label="Close" className="rounded-[4px] p-0.5 text-muted hover:bg-hover hover:text-ink">
+            <button type="button" onClick={onClose} aria-label="Close" className="press flex size-6 items-center justify-center rounded-full bg-fill text-muted hover:text-ink">
               <X className="size-4" />
             </button>
           </div>
@@ -535,7 +535,7 @@ function ObjectTooltip({
                         <span className="flex gap-1">
                           <Link
                             href={`/admin/orders?status=ALL&q=${o.orderNumber}`}
-                            className="inline-flex h-7 items-center rounded-[4px] border border-line-strong px-2 text-[12px] hover:bg-hover"
+                            className="press inline-flex h-7 items-center rounded-full border border-line-strong px-3 text-[12px] hover:bg-hover"
                           >
                             Details
                           </Link>

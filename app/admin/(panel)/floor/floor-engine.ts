@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 import { computeFloorStatus, formatAge, heatColor, type FloorObjectData, type FloorOrder } from "@/lib/floor";
-import { buildObject, buildRoom, buildSelection, disposeTree, PALETTE, SharedMaterials, tint, type BuiltObject } from "./three-builders";
+import { buildObject, buildRoom, buildSelection, disposeTree, PALETTE, setPalette, SharedMaterials, tint, type BuiltObject } from "./three-builders";
 
 export type EngineCallbacks = {
   onSelect: (id: string | null) => void;
@@ -34,6 +34,9 @@ export class FloorEngine {
   private ndc = new THREE.Vector2();
   private floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private sun: THREE.DirectionalLight;
+  private hemi: THREE.HemisphereLight;
+  private dark = false;
+  private lastLayout: { objects: FloorObjectData[]; width: number; depth: number } | null = null;
   private room: THREE.Group | null = null;
   private grid: THREE.LineSegments | null = null;
   private entries = new Map<string, Entry>();
@@ -62,14 +65,17 @@ export class FloorEngine {
     private container: HTMLElement,
     private cb: EngineCallbacks,
   ) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "low-power" });
+    // Transparent canvas: the lit, theme-aware stage behind it shows through.
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "low-power" });
     if (!this.renderer.getContext()) throw new Error("WebGL is not available");
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NoToneMapping;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.renderer.setClearColor(PALETTE.background);
+    this.renderer.setClearColor(0x000000, 0);
+    this.dark = document.documentElement.classList.contains("dark");
+    setPalette(this.dark);
     this.renderer.domElement.style.display = "block";
     this.renderer.domElement.style.touchAction = "none";
     this.renderer.domElement.tabIndex = 0;
@@ -94,8 +100,10 @@ export class FloorEngine {
       this.dirty = true;
     });
 
-    this.scene.add(new THREE.HemisphereLight("#ffffff", "#d8d2c4", 1.9));
-    this.sun = new THREE.DirectionalLight("#ffffff", 1.7);
+    this.hemi = new THREE.HemisphereLight("#ffffff", "#d8d2c4", 1.9);
+    this.scene.add(this.hemi);
+    this.sun = new THREE.DirectionalLight("#fff6ec", 1.7);
+    this.applyLights();
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.0004;
@@ -117,7 +125,34 @@ export class FloorEngine {
 
   // ─── public API ──────────────────────────────────────────────────────
 
+  /** Switch the scene between the light and dark palette (rebuilds the models, keeps the camera). */
+  setTheme(dark: boolean) {
+    if (dark === this.dark) return;
+    this.dark = dark;
+    setPalette(dark);
+    this.applyLights();
+    if (this.lastLayout) this.setLayout(this.lastLayout.objects, this.lastLayout.width, this.lastLayout.depth);
+    this.dirty = true;
+  }
+
+  private applyLights() {
+    if (this.dark) {
+      this.hemi.color.set("#e9e4ff");
+      this.hemi.groundColor.set("#2a2420");
+      this.hemi.intensity = 1.35;
+      this.sun.color.set("#ffd9b0");
+      this.sun.intensity = 1.25;
+    } else {
+      this.hemi.color.set("#ffffff");
+      this.hemi.groundColor.set("#d8d2c4");
+      this.hemi.intensity = 1.9;
+      this.sun.color.set("#fff6ec");
+      this.sun.intensity = 1.7;
+    }
+  }
+
   setLayout(objects: FloorObjectData[], width: number, depth: number) {
+    this.lastLayout = { objects, width, depth };
     const sizeChanged = width !== this.width || depth !== this.depth;
     this.width = width;
     this.depth = depth;
@@ -354,8 +389,8 @@ export class FloorEngine {
     // 0.5 m grid covering exactly the floor (stronger line every metre).
     const pts: number[] = [];
     const colors: number[] = [];
-    const major = new THREE.Color("#B3AEA2");
-    const minor = new THREE.Color("#D2CEC4");
+    const major = new THREE.Color(PALETTE.gridMajor);
+    const minor = new THREE.Color(PALETTE.gridMinor);
     const hw = this.width / 2;
     const hd = this.depth / 2;
     const line = (x1: number, z1: number, x2: number, z2: number, c: THREE.Color) => {
@@ -440,10 +475,10 @@ export class FloorEngine {
     const el = document.createElement("div");
     const isTable = b.data.kind === "TABLE";
     el.className = isTable
-      ? "flex items-center gap-1 whitespace-nowrap rounded-[4px] border border-line-strong bg-white/95 px-1.5 py-0.5 text-[12px] font-semibold text-ink shadow-[0_1px_2px_rgb(0_0_0/0.08)] tabular select-none"
-      : "flex items-center gap-1 whitespace-nowrap rounded-[3px] bg-white/80 px-1.5 py-px text-[11px] font-medium text-muted select-none";
+      ? "flex items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-white/90 px-2 py-0.5 text-[12px] font-semibold text-ink shadow-[0_4px_12px_-4px_rgb(0_0_0/0.25)] backdrop-blur-md tabular select-none dark:bg-[#2c2c2e]/85"
+      : "flex items-center gap-1 whitespace-nowrap rounded-full bg-white/75 px-2 py-px text-[11px] font-medium text-muted backdrop-blur-md select-none dark:bg-[#2c2c2e]/70";
     const dot = document.createElement("span");
-    dot.className = "inline-block size-2 rounded-[2px]";
+    dot.className = "inline-block size-2 rounded-full";
     dot.style.display = isTable || b.data.kind === "PASS" ? "inline-block" : "none";
     const main = document.createElement("span");
     main.textContent = isTable ? (b.data.tableNumber ?? b.data.label) : b.data.label;
@@ -496,7 +531,7 @@ export class FloorEngine {
             : "";
       if (e.labelSub.textContent !== sub) {
         e.labelSub.textContent = sub;
-        e.labelSub.style.color = overdue ? "#B42318" : "";
+        e.labelSub.style.color = overdue ? "var(--danger)" : "";
         this.dirty = true;
       }
     }

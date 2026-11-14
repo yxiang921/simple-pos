@@ -61,10 +61,10 @@ export function MenuBrowser({ menu, acceptingOrders }: { menu: GuestMenu; accept
     <>
       <nav
         ref={tabsRef}
-        className="sticky top-14 z-20 border-b border-line bg-surface"
+        className="glass sticky top-14 z-20 border-b border-line"
         aria-label="Menu categories"
       >
-        <div className="mx-auto flex max-w-3xl gap-1 overflow-x-auto px-3 py-2 [scrollbar-width:none]">
+        <div className="mx-auto flex max-w-3xl gap-1.5 overflow-x-auto px-3 py-2.5 [scrollbar-width:none]">
           {menu.categories.map((c) => (
             <a
               key={c.id}
@@ -72,8 +72,10 @@ export function MenuBrowser({ menu, acceptingOrders }: { menu: GuestMenu; accept
               href={`#cat-${c.id}`}
               onClick={() => setActive(c.id)}
               className={clsx(
-                "shrink-0 whitespace-nowrap rounded-[4px] px-3 py-1.5 text-[14px]",
-                active === c.id ? "bg-primary font-medium text-white" : "text-ink hover:bg-hover",
+                "press shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 text-[14px] transition-[background-color,color,box-shadow] duration-300",
+                active === c.id
+                  ? "bg-primary font-medium text-white shadow-[0_6px_16px_-8px_var(--primary-glow)]"
+                  : "bg-fill/70 text-ink hover:bg-hover",
               )}
             >
               {c.name}
@@ -82,13 +84,13 @@ export function MenuBrowser({ menu, acceptingOrders }: { menu: GuestMenu; accept
         </div>
       </nav>
 
-      <main className={clsx("mx-auto max-w-3xl pb-28 sm:px-4 sm:pt-4", count === 0 && "pb-10")}>
+      <main className={clsx("mx-auto max-w-3xl px-3 pb-32 pt-4 sm:px-4", count === 0 && "pb-12")}>
         {menu.categories.map((c) => (
-          <section key={c.id} id={`cat-${c.id}`} className="scroll-mt-[112px] sm:mb-4 sm:rounded-[6px] sm:border sm:border-line sm:bg-surface">
-            <h2 className="border-b border-line bg-[#fafaf8] px-4 py-2.5 text-[13px] font-semibold uppercase tracking-[0.04em] text-muted sm:rounded-t-[6px]">
+          <section key={c.id} id={`cat-${c.id}`} className="animate-fade-up mb-6 scroll-mt-[124px]">
+            <h2 className="px-1 pb-2.5 text-[22px] font-bold tracking-[-0.025em]">
               {c.name}
             </h2>
-            <ul className="divide-y divide-line">
+            <ul className="card divide-y divide-line overflow-hidden rounded-[22px]">
               {(itemsByCat.get(c.id) ?? []).map((item) => (
                 <MenuRow
                   key={item.id}
@@ -104,14 +106,14 @@ export function MenuBrowser({ menu, acceptingOrders }: { menu: GuestMenu; accept
       </main>
 
       {count > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-          <div className="mx-auto max-w-3xl">
+        <div className="animate-fade-up pointer-events-none fixed inset-x-0 bottom-0 z-30 p-3 pb-[max(0.9rem,env(safe-area-inset-bottom))]">
+          <div className="pointer-events-auto mx-auto max-w-3xl">
             <Link
               href={`${base}/cart`}
-              className="flex h-12 items-center justify-between rounded-[4px] bg-primary px-4 text-[15px] font-semibold text-white hover:bg-primary-hover"
+              className="press btn-primary flex h-14 items-center justify-between rounded-full bg-primary pl-2.5 pr-5 text-[16px] font-semibold text-white shadow-[0_18px_40px_-14px_var(--primary-glow)] hover:bg-primary-hover"
             >
               <span className="flex items-center gap-2">
-                <span className="tabular flex h-6 min-w-6 items-center justify-center rounded-[3px] bg-white/15 px-1 text-[13px]">{count}</span>
+                <span key={count} className="animate-pop tabular flex size-9 items-center justify-center rounded-full bg-white/20 text-[14px]">{count}</span>
                 View cart
               </span>
               <span className="tabular">{formatRM(centsToString(totalCents))}</span>
@@ -151,28 +153,28 @@ function MenuRow({
   const cart = useCartActions();
   const limit = Math.min(MAX_PER_ITEM, item.maxServings ?? MAX_PER_ITEM);
   return (
-    <li className={clsx("flex gap-3 px-4 py-3.5", out && "opacity-60")}>
+    <li className={clsx("flex gap-4 px-4 py-4 transition-colors duration-200 hover:bg-hover/60", out && "opacity-55")}>
       <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
-        <p className="text-[15px] font-medium leading-snug">{item.name}</p>
+        <p className="text-[16px] font-semibold leading-snug tracking-[-0.015em]">{item.name}</p>
         {item.description && <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted">{item.description}</p>}
-        <p className="tabular mt-1.5 text-[14px] font-semibold">{formatRM(item.price)}</p>
+        <p className="tabular mt-2 text-[15px] font-semibold text-primary">{formatRM(item.price)}</p>
         {out ? (
-          <p className="mt-0.5 text-[12px] font-medium text-danger">Sold out</p>
+          <span className="mt-1.5 inline-flex h-[22px] items-center rounded-full bg-danger-soft px-2.5 text-[11.5px] font-semibold text-danger">Sold out</span>
         ) : item.maxServings !== null && item.maxServings <= 5 ? (
-          <p className="mt-0.5 text-[12px] text-warning">Only {item.maxServings} left</p>
+          <span className="mt-1.5 inline-flex h-[22px] items-center rounded-full bg-warning-soft px-2.5 text-[11.5px] font-semibold text-warning">Only {item.maxServings} left</span>
         ) : null}
       </button>
-      <div className="flex w-[92px] shrink-0 flex-col items-end gap-2">
+      <div className="relative w-[104px] shrink-0">
         <button type="button" onClick={onOpen} className="block" aria-label={`View ${item.name}`} tabIndex={-1}>
-          <ItemImage item={item} className="size-[92px]" />
+          <ItemImage item={item} className="size-[104px]" />
         </button>
         {!out && acceptingOrders && (
-          <div className="w-full">
+          <div className="absolute -bottom-2 left-1/2 w-[88px] -translate-x-1/2">
             {qty === 0 ? (
               <button
                 type="button"
                 onClick={() => cart.add(item)}
-                className="flex h-8 w-full items-center justify-center gap-1 rounded-[4px] border border-primary text-[13px] font-semibold text-primary hover:bg-primary-soft"
+                className="press glass-strong flex h-8 w-full items-center justify-center gap-1 rounded-full border border-line text-[13px] font-semibold text-primary shadow-[0_6px_16px_-8px_rgb(0_0_0/0.35)] hover:border-primary/40"
               >
                 <Plus className="size-3.5" /> Add
               </button>
@@ -193,14 +195,22 @@ function MenuRow({
 
 export function ItemImage({ item, className }: { item: { name: string; imageUrl: string | null }; className?: string }) {
   if (item.imageUrl) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={item.imageUrl} alt="" loading="lazy" className={clsx("rounded-[4px] border border-line bg-[#fafaf8] object-cover", className)} />;
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={item.imageUrl}
+        alt=""
+        loading="lazy"
+        className={clsx("rounded-[18px] border border-line bg-fill object-cover shadow-[0_8px_20px_-12px_rgb(0_0_0/0.4)]", className)}
+      />
+    );
   }
   return (
     <div
       aria-hidden
       className={clsx(
-        "flex items-center justify-center rounded-[4px] border border-line bg-[#f3f3f0] text-[18px] font-semibold text-[#b5b5ae]",
+        "relative flex items-center justify-center overflow-hidden rounded-[18px] bg-gradient-to-br from-[#f6d6b8] via-[#eab68a] to-[#cc7736] text-[22px] font-bold tracking-[-0.02em] text-white/95 shadow-[0_10px_24px_-14px_var(--primary-glow),inset_0_1px_0_rgb(255_255_255/0.45)]",
+        "dark:from-[#6b4024] dark:via-[#94572a] dark:to-[#cc7736]",
         className,
       )}
     >
@@ -229,23 +239,23 @@ export function Stepper({
 }) {
   const h = size === "lg" ? "h-11" : "h-8";
   return (
-    <div className={clsx("flex w-full items-stretch overflow-hidden rounded-[4px] border border-primary", h)}>
+    <div className={clsx("glass-strong flex w-full items-stretch overflow-hidden rounded-full border border-primary/40 shadow-[0_6px_16px_-8px_rgb(0_0_0/0.35)]", h)}>
       <button
         type="button"
         onClick={() => onChange(value - 1)}
-        className="flex flex-1 items-center justify-center text-primary hover:bg-primary-soft"
+        className="press flex flex-1 items-center justify-center text-primary hover:bg-primary-soft"
         aria-label={`Decrease ${label}`}
       >
         <Minus className="size-3.5" />
       </button>
-      <span className="tabular flex min-w-7 items-center justify-center bg-primary px-1 text-[13px] font-semibold text-white" aria-live="polite">
+      <span key={value} className="animate-pop tabular flex min-w-7 items-center justify-center px-1 text-[14px] font-semibold text-ink" aria-live="polite">
         {value}
       </span>
       <button
         type="button"
         onClick={() => onChange(value + 1)}
         disabled={value >= max}
-        className="flex flex-1 items-center justify-center text-primary hover:bg-primary-soft disabled:opacity-40"
+        className="press flex flex-1 items-center justify-center text-primary hover:bg-primary-soft disabled:opacity-40"
         aria-label={`Increase ${label}`}
       >
         <Plus className="size-3.5" />
@@ -280,9 +290,9 @@ function ItemDialog({
           {inCart > 0 && <p className="text-[13px] text-muted">{inCart} already in cart</p>}
         </div>
         {out ? (
-          <p className="rounded-[4px] bg-danger-soft px-3 py-2 text-[13px] text-danger">Sold out for now.</p>
+          <p className="rounded-[12px] bg-danger-soft px-3 py-2 text-[13px] text-danger">Sold out for now.</p>
         ) : !acceptingOrders ? (
-          <p className="rounded-[4px] bg-warning-soft px-3 py-2 text-[13px] text-warning">Ordering is paused.</p>
+          <p className="rounded-[12px] bg-warning-soft px-3 py-2 text-[13px] text-warning">Ordering is paused.</p>
         ) : limit === 0 ? (
           <p className="text-[13px] text-warning">You have the maximum available in your cart.</p>
         ) : (
@@ -296,7 +306,7 @@ function ItemDialog({
                 cart.add(item, qty);
                 onClose();
               }}
-              className="tabular flex h-11 flex-1 items-center justify-center rounded-[4px] bg-primary px-4 text-[15px] font-semibold text-white hover:bg-primary-hover"
+              className="press btn-primary tabular flex h-11 flex-1 items-center justify-center rounded-full bg-primary px-4 text-[15px] font-semibold text-white hover:bg-primary-hover"
             >
               Add · {formatRM(centsToString(toCents(item.price) * qty))}
             </button>

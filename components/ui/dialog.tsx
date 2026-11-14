@@ -42,27 +42,27 @@ export function Dialog({
       }}
       className={clsx(
         // text-left/whitespace-normal: dialogs are often rendered inside right-aligned table cells.
-        "m-auto w-[calc(100%-2rem)] whitespace-normal rounded-[6px] border border-line bg-surface p-0 text-left text-[14px] font-normal text-ink shadow-[0_8px_24px_rgb(0_0_0/0.12)]",
+        "glass-strong shadow-pop m-auto w-[calc(100%-2rem)] whitespace-normal rounded-[22px] border border-line p-0 text-left text-[14px] font-normal text-ink",
         { sm: "max-w-sm", md: "max-w-lg", lg: "max-w-2xl" }[width],
       )}
     >
       {open && (
         <div>
-          <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-3.5">
+          <div className="flex items-start justify-between gap-4 px-6 pb-2 pt-5">
             <div>
-              <h2 className="text-[15px] font-semibold">{title}</h2>
-              {description && <p className="mt-0.5 text-[13px] text-muted">{description}</p>}
+              <h2 className="text-[18px] font-semibold tracking-[-0.02em]">{title}</h2>
+              {description && <p className="mt-1 text-[13px] leading-relaxed text-muted">{description}</p>}
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="-mr-1 rounded-[4px] p-1 text-muted hover:bg-hover hover:text-ink"
+              className="press -mr-2 -mt-1 flex size-7 items-center justify-center rounded-full bg-fill text-muted hover:text-ink"
               aria-label="Close"
             >
-              <X className="size-4" />
+              <X className="size-3.5" strokeWidth={2.5} />
             </button>
           </div>
-          <div className="px-5 py-4">{children}</div>
+          <div className="px-6 pb-5 pt-3">{children}</div>
         </div>
       )}
     </dialog>
@@ -70,5 +70,5 @@ export function Dialog({
 }
 
 export function DialogFooter({ children }: { children: ReactNode }) {
-  return <div className="-mx-5 -mb-4 mt-5 flex justify-end gap-2 border-t border-line bg-[#fafaf8] px-5 py-3">{children}</div>;
+  return <div className="-mx-6 -mb-5 mt-6 flex justify-end gap-2 border-t border-line bg-surface-2/50 px-6 py-3.5 dark:bg-white/[0.02]">{children}</div>;
 }

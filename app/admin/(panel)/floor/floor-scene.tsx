@@ -55,7 +55,12 @@ export default function FloorScene(props: Props) {
     }
     // The effects below (declared after this one) push the initial props in the same commit.
     engineRef.current = engine;
+    // Follow the light / dark theme (class on <html>).
+    const root = document.documentElement;
+    const themeObserver = new MutationObserver(() => engine.setTheme(root.classList.contains("dark")));
+    themeObserver.observe(root, { attributes: true, attributeFilter: ["class"] });
     return () => {
+      themeObserver.disconnect();
       engine.dispose();
       engineRef.current = null;
     };

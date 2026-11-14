@@ -39,10 +39,11 @@ export default async function OrderSuccessPage({ params }: PageProps<"/s/[mercha
 
   return (
     <main className="mx-auto max-w-lg pb-12 sm:px-4 sm:pt-6">
-      <section className="border-b border-line bg-surface px-5 py-6 text-center sm:rounded-[6px] sm:border">
+      <section className="card animate-pop relative mx-3 mt-4 overflow-hidden rounded-[26px] px-6 py-8 text-center sm:mx-0">
+        <div className="pointer-events-none absolute -top-24 left-1/2 h-48 w-72 -translate-x-1/2 rounded-full bg-primary/25 blur-3xl" aria-hidden />
         {!cancelled && (
-          <span className="mx-auto mb-3 flex size-10 items-center justify-center rounded-[6px] bg-primary-soft text-primary">
-            <Check className="size-5" strokeWidth={2.5} />
+          <span className="relative mx-auto mb-4 flex size-14 items-center justify-center rounded-full bg-gradient-to-br from-[#e8a46d] to-primary text-white shadow-[0_12px_30px_-10px_var(--primary-glow)]">
+            <Check className="size-7" strokeWidth={2.75} />
           </span>
         )}
         <p className="text-[13px] text-muted">{cancelled ? "Order cancelled" : "Order placed"}</p>
@@ -57,7 +58,12 @@ export default async function OrderSuccessPage({ params }: PageProps<"/s/[mercha
           <ol className="mt-5 grid grid-cols-4 gap-1" aria-label="Order progress">
             {STEPS.map((s, i) => (
               <li key={s} className="text-center">
-                <span className={clsx("block h-1 rounded-[1px]", i <= stepIndex ? "bg-primary" : "bg-line")} />
+                <span
+                  className={clsx(
+                    "block h-1.5 rounded-full transition-colors duration-500",
+                    i <= stepIndex ? "bg-gradient-to-r from-[#e8a46d] to-primary shadow-[0_0_10px_var(--primary-glow)]" : "bg-fill",
+                  )}
+                />
                 <span
                   className={clsx("mt-1.5 block text-[12px]", i === stepIndex ? "font-semibold text-primary" : "text-muted")}
                   aria-current={i === stepIndex ? "step" : undefined}
@@ -70,7 +76,7 @@ export default async function OrderSuccessPage({ params }: PageProps<"/s/[mercha
         )}
       </section>
 
-      <section className="mt-3 border-y border-line bg-surface sm:rounded-[6px] sm:border">
+      <section className="card animate-fade-up mx-3 mt-4 overflow-hidden rounded-[22px] [animation-delay:0.08s] sm:mx-0">
         <div className="flex items-center justify-between border-b border-line px-5 py-3 text-[13px] text-muted">
           <span>Placed at {formatTime(order.createdAt)}</span>
           <span className={order.paymentStatus === "PAID" ? "font-medium text-primary" : ""}>
@@ -97,7 +103,7 @@ export default async function OrderSuccessPage({ params }: PageProps<"/s/[mercha
       <div className="mt-5 px-4 text-center sm:px-0">
         <Link
           href={base}
-          className="inline-flex h-11 items-center rounded-[4px] border border-line-strong bg-surface px-5 text-[14px] font-medium hover:bg-hover"
+          className="press inline-flex h-11 items-center rounded-full border border-line bg-surface/70 px-6 text-[14px] font-medium hover:border-line-strong dark:bg-white/[0.06]"
         >
           Order something else
         </Link>

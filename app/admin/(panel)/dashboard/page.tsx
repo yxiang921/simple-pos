@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { prisma } from "@/lib/db";
+import { prisma, table } from "@/lib/db";
 import { countLowStock, lowStockIngredients } from "@/lib/services/inventory";
 import { branchFilter, requireContext } from "@/lib/tenant";
-import { dayRangeUtc, localDate } from "@/lib/time";
+import { addDays, dayRangeUtc, localDate } from "@/lib/time";
 import { formatOrderNumber, formatQty, formatRM, formatTime, type BaseUnitCode } from "@/lib/format";
-import { Badge, EmptyState, PageHeader, Panel, PanelHeader, Table, TD, TH, THead, TR } from "@/components/ui/misc";
+import { Badge, EmptyState, Meter, PageHeader, Panel, PanelHeader, StatGrid, Table, TD, TH, THead, TR, type Stat } from "@/components/ui/misc";
+import { AreaChart } from "@/components/charts";
+import { Clock3, PackageOpen, ReceiptText, TrendingUp } from "lucide-react";
+import { Prisma } from "@/lib/generated/prisma/client";
 import { OrderStatusBadge } from "../orders/status-badge";
 import { SwitchBranchLink } from "../branch-switcher";
 
@@ -42,16 +45,38 @@ export default async function DashboardPage() {
     overview ? branchSummaries(ctx.branches.map((b) => b.id), since) : Promise.resolve(null),
   ]);
 
-  const stats = [
-    { label: "Orders today", value: String(todayAgg._count), sub: cancelledToday ? `${cancelledToday} cancelled` : "Excludes cancelled" },
-    { label: "Sales today", value: formatRM(todayAgg._sum.totalAmount?.toString() ?? "0"), sub: "Before payment" },
-    { label: "Pending orders", value: String(pending), sub: `${preparing} preparing / ready`, href: "/admin/orders?status=PENDING" },
+  const hourly = await salesByHour(ctx.merchant.id, ctx.branch?.id ?? null, ctx.settings.timezone);
+  const stats: Stat[] = [
+    {
+      label: "Orders today",
+      value: todayAgg._count.toLocaleString(),
+      sub: cancelledToday ? `${cancelledToday} cancelled` : "Excludes cancelled",
+      icon: <ReceiptText />,
+      tone: "brand",
+    },
+    {
+      label: "Sales today",
+      value: formatRM(todayAgg._sum.totalAmount?.toString() ?? "0"),
+      sub: hourly.change === null ? "Before payment" : `${hourly.change >= 0 ? "▲" : "▼"} ${Math.abs(Math.round(hourly.change * 100))}% vs last week, same time`,
+      icon: <TrendingUp />,
+      tone: "success",
+    },
+    {
+      label: "Pending orders",
+      value: String(pending),
+      sub: `${preparing} preparing / ready`,
+      href: "/admin/orders?status=PENDING",
+      icon: <Clock3 />,
+      tone: "info",
+    },
     {
       label: "Low-stock ingredients",
       value: String(lowStock.length),
       sub: lowStock.length ? "Restock needed" : "All above threshold",
       href: "/admin/ingredients?filter=low",
-      warn: lowStock.length > 0,
+      icon: <PackageOpen />,
+      tone: "warning",
+      valueTone: lowStock.length > 0 ? "warning" : undefined,
     },
   ];
 
@@ -66,28 +91,32 @@ export default async function DashboardPage() {
         }
       />
 
-      <div className="mb-5 grid grid-cols-2 border-l border-t border-line bg-surface lg:grid-cols-4">
-        {stats.map((s) => {
-          const body = (
-            <>
-              <p className="text-[12px] font-medium uppercase tracking-[0.03em] text-muted">{s.label}</p>
-              <p className={`tabular mt-1.5 text-[24px] font-semibold leading-none ${s.warn ? "text-warning" : "text-ink"}`}>
-                {s.value}
-              </p>
-              <p className="mt-1.5 text-[12px] text-muted">{s.sub}</p>
-            </>
-          );
-          return s.href ? (
-            <Link key={s.label} href={s.href} className="border-b border-r border-line px-4 py-3.5 hover:bg-[#fbfbfa]">
-              {body}
-            </Link>
-          ) : (
-            <div key={s.label} className="border-b border-r border-line px-4 py-3.5">
-              {body}
-            </div>
-          );
-        })}
-      </div>
+      <StatGrid stats={stats} />
+
+      <Panel className="mb-5">
+        <PanelHeader
+          title="Sales by hour"
+          actions={
+            <span className="flex items-center gap-4 text-[12px] text-muted">
+              <span className="flex items-center gap-1.5">
+                <span className="h-[3px] w-4 rounded-full bg-primary" /> Today
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-0 w-4 border-t-[1.5px] border-dashed border-subtle" /> Same day last week
+              </span>
+            </span>
+          }
+        />
+        <div className="px-4 pb-3 pt-4">
+          <AreaChart
+            ariaLabel="Sales by hour today"
+            data={hourly.today}
+            compare={hourly.lastWeek}
+            nowIndex={hourly.nowIndex}
+            format={(v) => `RM ${Math.round(v)}`}
+          />
+        </div>
+      </Panel>
 
       {perBranch && (
         <Panel className="mb-5">
@@ -132,9 +161,7 @@ export default async function DashboardPage() {
                     <TD className={`tabular text-right ${r.low ? "text-warning" : "text-muted"}`}>{r.low}</TD>
                     <TD className="text-right">
                       <span className="inline-flex items-center gap-2">
-                        <span className="h-1.5 w-20 overflow-hidden rounded-[2px] bg-[#ecece8]">
-                          <span className="block h-full bg-primary" style={{ width: `${Math.round(share * 100)}%` }} />
-                        </span>
+                        <Meter value={share} className="w-24" />
                         <span className="tabular w-9 text-[12px] text-muted">{Math.round(share * 100)}%</span>
                       </span>
                     </TD>
@@ -277,4 +304,40 @@ async function branchSummaries(branchIds: string[], since: Date) {
       ];
     }),
   );
+}
+
+/** Sales per local hour today and on the same weekday last week (up to the same time), for the chart. */
+async function salesByHour(merchantId: string, branchId: string | null, tz: string) {
+  const today = localDate(new Date(), tz);
+  const lastWeek = addDays(today, -7);
+  const start = dayRangeUtc(lastWeek, tz).start;
+  const where = branchId ? Prisma.sql`o.branch_id = ${branchId}` : Prisma.sql`b.merchant_id = ${merchantId}`;
+  const rows = await prisma.$queryRaw<{ day: string; hour: number; total: string }[]>`
+    SELECT ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE ${tz})::date::text AS day,
+           EXTRACT(HOUR FROM ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE ${tz}))::int AS hour,
+           SUM(o.total_amount)::text AS total
+    FROM ${table("orders")} o JOIN ${table("branches")} b ON b.id = o.branch_id
+    WHERE ${where} AND o.status <> 'CANCELLED' AND o.created_at >= ${start}
+    GROUP BY 1, 2`;
+  const by = (day: string) => {
+    const a = Array<number>(24).fill(0);
+    for (const r of rows) if (r.day === day) a[r.hour] = Number(r.total);
+    return a;
+  };
+  const t = by(today);
+  const w = by(lastWeek);
+  const nowHour = Number(new Intl.DateTimeFormat("en-GB", { hour: "2-digit", hourCycle: "h23", timeZone: tz }).format(new Date()));
+  // Show the business hours that have any sales (either day), at least 7:00–21:00.
+  const used = [...t.keys()].filter((h) => t[h] > 0 || w[h] > 0);
+  const from = Math.min(7, ...used);
+  const to = Math.max(21, ...used);
+  const hours = Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  const sumTo = (a: number[]) => a.slice(0, nowHour + 1).reduce((s, v) => s + v, 0);
+  const prev = sumTo(w);
+  return {
+    today: hours.map((h) => ({ label: `${String(h).padStart(2, "0")}:00`, value: t[h] })),
+    lastWeek: hours.map((h) => w[h]),
+    nowIndex: Math.max(0, Math.min(hours.length - 1, nowHour - from)),
+    change: prev > 0 ? sumTo(t) / prev - 1 : null,
+  };
 }
