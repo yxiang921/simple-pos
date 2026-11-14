@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
+import { dbSchema } from "@/lib/db-schema";
 import { addDays, localDate } from "@/lib/time";
 import {
   dummyAliases,
@@ -92,5 +93,44 @@ describe("simulated history", () => {
     const after = await historyCoverage(35, "Asia/Kuala_Lumpur");
     expect(after.needing).toContain(days[0]);
     expect(after.needing).not.toContain(days[1]);
+  });
+});
+
+describe("real-data patterns", () => {
+  it("loads the pattern file built from the public datasets", async () => {
+    const { loadPatterns } = await import("../scripts/lib/demo");
+    const p = loadPatterns();
+    expect(p.yaz.days).toBe(760);
+    expect(p.yaz.dow.TOTAL[5]).toBeGreaterThan(1.3); // Saturday busy
+    expect(p.yaz.dow.TOTAL[6]).toBeLessThan(0.8); // Sunday quiet
+    expect(p.indonesia.basket["1"]).toBeGreaterThan(0.8);
+    expect(p.malaysia.fb.revenuePerEmployeeDay).toBeGreaterThan(100);
+    expect(p.malaysia.arrivals.seasonByMonth[11]).toBeGreaterThan(p.malaysia.arrivals.seasonByMonth[1]); // Dec > Feb
+    expect(p.sources.every((s) => s.license === "CC BY 4.0")).toBe(true);
+  });
+
+  it("classifies menu items into the dataset's groups and dish profiles", async () => {
+    const { itemGroup, yazProfile } = await import("../scripts/lib/demo");
+    expect(itemGroup("Teh Tarik", "Drinks")).toBe("drink");
+    expect(itemGroup("Roti Canai with Dhal", "Breakfast")).toBe("snack");
+    expect(itemGroup("Nasi Lemak Ayam Goreng", "Rice & Noodles")).toBe("main");
+    expect(yazProfile("Nasi Lemak Ayam Goreng")).toBe("HAEHNCHEN");
+    expect(yazProfile("Char Kway Teow")).toBe("GARNELEN");
+    expect(yazProfile("Nasi Lemak Biasa")).toBe("TOTAL");
+  });
+
+  it("generated history follows the real weekday shape and is sized from DOSM", async () => {
+    await seedBurgerScenario();
+    const today = localDate(new Date());
+    const days = Array.from({ length: 28 }, (_, i) => addDays(today, -28 + i));
+    const r = await simulateDays(days, { windowDays: 365, staff: 3 });
+    expect(r.targetRevenuePerDay).toBe(r.staff * 283);
+    const rows = await prisma.$queryRawUnsafe<{ dow: number; n: number }[]>(
+      `SELECT EXTRACT(ISODOW FROM ((created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kuala_Lumpur'))::int AS dow, COUNT(*)::int AS n
+       FROM "${dbSchema()}"."orders" WHERE is_simulated GROUP BY 1`,
+    );
+    const by = Object.fromEntries(rows.map((x) => [x.dow, x.n]));
+    expect(by[6]).toBeGreaterThan(by[7] * 1.5); // Saturday vs Sunday, as in the Yaz data
+    expect(await prisma.order.count({ where: { isSimulated: false } })).toBe(0);
   });
 });

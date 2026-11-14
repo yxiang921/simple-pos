@@ -8,6 +8,8 @@ export type PrepRow = {
   category: string;
   isPreparedAhead: boolean | null;
   isAvailable: boolean;
+  /** true when the plates number came from the history simulator, not staff. */
+  prepSimulated: boolean;
   platesPrepared: number | null;
   sold: number;
   soldOutAt: string | null;
@@ -42,6 +44,7 @@ export async function getPrepSheet(date: string): Promise<{ timezone: string; ro
   ]);
 
   const prepBy = new Map(preps.map((p) => [p.menuItemId, p.platesPrepared]));
+  const prepSim = new Set(preps.filter((p) => p.isSimulated).map((p) => p.menuItemId));
   const soldBy = new Map(sold.map((s) => [s.menuItemId, s._sum.quantity ?? 0]));
   const soldOutBy = new Map<string, Date>();
   for (const e of soldOuts) if (!soldOutBy.has(e.menuItemId)) soldOutBy.set(e.menuItemId, e.soldOutAt);
@@ -53,6 +56,7 @@ export async function getPrepSheet(date: string): Promise<{ timezone: string; ro
     isPreparedAhead: m.isPreparedAhead,
     isAvailable: m.isAvailable,
     platesPrepared: prepBy.get(m.id) ?? null,
+    prepSimulated: prepSim.has(m.id),
     sold: soldBy.get(m.id) ?? 0,
     soldOutAt: soldOutBy.get(m.id)?.toISOString() ?? null,
   }));

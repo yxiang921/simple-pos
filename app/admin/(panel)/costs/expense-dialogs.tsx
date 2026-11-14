@@ -24,6 +24,7 @@ export type ExpenseRow = {
   startDate: string;
   endDate: string | null;
   notes: string;
+  isSimulated?: boolean;
 };
 
 type Errors = Record<string, string[] | undefined>;

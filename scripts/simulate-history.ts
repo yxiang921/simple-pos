@@ -1,9 +1,9 @@
 /**
  * Generate SIMULATED order history for demand-planning demos (BossBuddy).
  *
- *   npm run demo:history                      # fill days in the last 35 that have no history yet
+ *   npm run demo:history                      # fill days in the last 365 that have no history yet (real-data patterns)
  *   npm run demo:history -- --reset           # delete all simulated history, then regenerate
- *   npm run demo:history -- --days=56         # 8-week window
+ *   npm run demo:history -- --days=90         # shorter window (default 365 days)
  *   npm run demo:history -- --remove          # delete simulated history AND demo running costs
  *   npm run demo:history -- --no-demo-defaults
  *
@@ -29,7 +29,7 @@ const args = new Map(
     return [k, v ?? "true"] as const;
   }),
 );
-const DAYS = Math.min(120, Math.max(7, Number(args.get("days") ?? 35)));
+const DAYS = Math.min(730, Math.max(7, Number(args.get("days") ?? 365)));
 
 async function main() {
   requireCurrentClient();
@@ -73,6 +73,7 @@ async function main() {
     `✓ ${r.orders} orders, ${r.plates} plates sold, ${r.prepRows} prep rows, ${r.soldOuts} sold-out events ` +
       `(${r.missed} plates of unmet demand). Stock was not changed.`,
   );
+  console.log(`  Sized for ${r.staff} staff × RM ${r.targetRevenuePerDay / r.staff}/worker/day (DOSM) = ~RM ${r.targetRevenuePerDay}/day. Patterns: data/real-patterns.json`);
 }
 
 main()

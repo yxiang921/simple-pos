@@ -25,7 +25,9 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
   const q = typeof sp.q === "string" ? sp.q.trim().slice(0, 60) : "";
   const page = Math.max(1, Number(sp.page) || 1);
 
-  const where: Prisma.OrderWhereInput = {};
+  // Simulated history (is_simulated) is hidden unless asked for, so the live queue stays clean.
+  const showSim = sp.sim === "1";
+  const where: Prisma.OrderWhereInput = showSim ? {} : { isSimulated: false };
   if (filter === "ACTIVE") where.status = { in: ["PENDING", "PREPARING", "READY"] };
   else if (filter !== "ALL") where.status = filter as OrderStatusCode;
   if (q) {
@@ -49,7 +51,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
       },
     }),
     prisma.order.count({ where }),
-    prisma.order.groupBy({ by: ["status"], _count: true }),
+    prisma.order.groupBy({ by: ["status"], where: showSim ? {} : { isSimulated: false }, _count: true }),
   ]);
   const countBy = Object.fromEntries(counts.map((c) => [c.status, c._count])) as Record<string, number>;
   const activeCount = (countBy.PENDING ?? 0) + (countBy.PREPARING ?? 0) + (countBy.READY ?? 0);
@@ -57,7 +59,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
 
   const href = (params: Record<string, string | number | undefined>) => {
     const u = new URLSearchParams();
-    const merged = { status: filter, q, page: 1, ...params };
+    const merged = { status: filter, q, page: 1, sim: showSim ? "1" : undefined, ...params };
     for (const [k, v] of Object.entries(merged)) if (v !== undefined && v !== "" && !(k === "page" && v === 1)) u.set(k, String(v));
     return `/admin/orders?${u.toString()}`;
   };
@@ -87,10 +89,14 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
         </div>
         <form className="flex gap-2" action="/admin/orders">
           <input type="hidden" name="status" value={filter} />
+          {showSim && <input type="hidden" name="sim" value="1" />}
           <Input name="q" defaultValue={q} placeholder="Order #, customer or table" className="h-8 w-60" aria-label="Search orders" />
           <button className={buttonClass("secondary")} type="submit">
             Search
           </button>
+          <Link href={href({ sim: showSim ? undefined : "1" })} className={buttonClass("ghost")}>
+            {showSim ? "Hide simulated" : "Show simulated"}
+          </Link>
         </form>
       </div>
 
@@ -153,7 +159,10 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
                     </TD>
                     <TD className="tabular whitespace-nowrap text-right">{formatRM(o.totalAmount.toString())}</TD>
                     <TD>
-                      <OrderStatusBadge status={o.status} />
+                      <span className="flex items-center gap-1">
+                        <OrderStatusBadge status={o.status} />
+                        {o.isSimulated && <Badge tone="outline">Simulated</Badge>}
+                      </span>
                     </TD>
                     <TD>
                       {o.paymentStatus === "PAID" ? <Badge tone="green">Paid</Badge> : <Badge tone="outline">Unpaid</Badge>}

@@ -132,6 +132,7 @@ export function PrepSheet({ date, today, timezone, rows }: { date: string; today
                         className="tabular h-8 w-24 text-right"
                         aria-label={`Plates prepared: ${r.name}`}
                       />
+                      {r.prepSimulated && <span className="ml-1.5 text-[11px] text-warning">simulated</span>}
                     </TD>
                     <TD className="tabular text-right">{r.sold}</TD>
                     <TD

@@ -4,7 +4,7 @@
  *
  *   npm run db:check                       # read-only: SELECTs only, shows what is empty
  *   npm run db:fill                        # check → fill empties with dummy data → check again
- *   npm run db:fill -- --days=56           # history window (default 35 days = 5 weeks)
+ *   npm run db:fill -- --days=90           # history window (default 365 days)
  *   npm run db:fill -- --undo=latest       # revert the last fill (or --undo=reports/<file>.json)
  *
  * Fill never overwrites existing values. It writes a change log to
@@ -42,7 +42,7 @@ const args = new Map(
     return [k, v.length ? v.join("=") : "true"] as const;
   }),
 );
-const DAYS = Math.min(120, Math.max(7, Number(args.get("days") ?? 35)));
+const DAYS = Math.min(730, Math.max(7, Number(args.get("days") ?? 365)));
 const MODE: "check" | "fill" | "undo" = args.has("undo") ? "undo" : args.has("fill") ? "fill" : "check";
 const REPORT_DIR = path.join(process.cwd(), "reports");
 

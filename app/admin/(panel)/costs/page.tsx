@@ -71,6 +71,7 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
       startDate: start,
       endDate: end,
       notes: e.notes,
+      isSimulated: e.isSimulated,
       monthly: monthlyEquivalent(e.amount, e.frequency)?.toFixed(2) ?? null,
       status,
     };
@@ -175,7 +176,10 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
                 {rows.map((r) => (
                   <TR key={r.id} className={r.status === "ended" && r.frequency !== "ONE_TIME" ? "text-muted" : undefined}>
                     <TD>
-                      <p className="font-medium">{r.name}</p>
+                      <p className="font-medium">
+                        {r.name}
+                        {r.isSimulated && <span className="ml-1.5 text-[11px] font-normal text-warning">simulated</span>}
+                      </p>
                       {r.notes && (
                         <p className="max-w-[220px] truncate text-[12px] text-muted" title={r.notes}>
                           {r.notes}

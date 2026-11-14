@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
-import { ArrowLeftRight, Box, ClipboardList, LayoutGrid, Package, ReceiptText, Settings, UtensilsCrossed, Wallet } from "lucide-react";
+import { ArrowLeftRight, Box, ClipboardList, Database, LayoutGrid, Package, ReceiptText, Settings, UtensilsCrossed, Wallet } from "lucide-react";
 
 const NAV = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutGrid },
@@ -15,6 +15,7 @@ const NAV = [
   { href: "/admin/inventory/movements", label: "Stock movements", icon: ArrowLeftRight },
   { href: "/admin/costs", label: "Costs", icon: Wallet },
   { href: "/admin/settings", label: "Settings", icon: Settings },
+  { href: "/admin/data-sources", label: "Data sources", icon: Database },
 ];
 
 function isActive(pathname: string, href: string) {

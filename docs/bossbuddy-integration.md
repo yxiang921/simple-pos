@@ -91,17 +91,17 @@ BossBuddy can react to changes instead of polling: `LISTEN pos_changes` on a ses
 
 ## P2 — demo history
 
-`npm run demo:history` generates **35 days** (5 weeks, so every weekday appears ≥ 4×) before today:
+`npm run demo:history` generates **365 days** before today from real-data patterns (see README → *Simulated history from real-data patterns*, and **Admin → Data sources**):
 
 - `orders` (`status = COMPLETED`, `payment_status = PAID`, **`is_simulated = true`**) + `order_items` + `order_ingredients`
 - `daily_prep` for items with `is_prepared_ahead = true` (`is_simulated = true`)
 - `sold_out_events` on days simulated demand reached the plates prepared (`is_simulated = true`)
 
-Weekday pattern (Sat/Sun ≈ 1.4× Mon), breakfast/lunch/dinner peaks, ±15 % noise, slight growth. Simulated orders **do not change ingredient stock or `inventory_movements`**. Real orders/prep are never touched; real `daily_prep` rows win over simulated ones.
+Patterns: Yaz weekday shape (Sat ×1.51, Sun ×0.68) and real day-to-day swings per dish; Indonesian POS order sizes (85% one item), food/drink mix and hour curve; DOSM shop size (RM 283 per worker per day × staff) and trend; Imigresen monthly JB season; KTMB daily crowd surges on the exact date. Simulated staff prep a fixed weekday/weekend amount + 10–30% buffer. Simulated orders **do not change ingredient stock or `inventory_movements`**. Real orders/prep are never touched; real `daily_prep` rows win over simulated ones.
 
 ```
 npm run demo:history -- --reset       # regenerate
-npm run demo:history -- --days=56     # 8 weeks
+npm run demo:history -- --days=90     # lighter: 90 days
 npm run demo:history -- --remove      # delete all simulated data
 ```
 

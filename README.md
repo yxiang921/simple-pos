@@ -63,7 +63,8 @@ No secret is exposed to the browser — there are no `NEXT_PUBLIC_*` variables.
 | `npm run admin:password` | Create the admin, or reset its password, from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` |
 | `npm run db:check` | Read-only data check of the POS schema: migrations, menu, recipes, costs, history, prep, running costs — shows what is empty |
 | `npm run db:fill` | Check → fill everything still empty with **dummy** data (never overwrites) → check again. Writes `reports/db-fill-*.json`; undo with `npm run db:fill -- --undo=latest` |
-| `npm run demo:history` | Generate 5 weeks of **simulated** order / prep / sold-out history (flagged `is_simulated`, stock untouched). `-- --reset`, `-- --remove`, `-- --days=56` |
+| `npm run demo:history` | Generate a year of **simulated** order / prep / sold-out history from real-data patterns (flagged `is_simulated`, stock untouched). `-- --reset`, `-- --remove`, `-- --days=90`, `-- --staff=4` |
+| `npm run patterns:build -- --source="…/bossbuddy-public-data"` | Rebuild `data/real-patterns.json` from the public datasets (only needed if the datasets change) |
 
 ---
 
@@ -152,6 +153,26 @@ Every admin page (dashboard, orders, floor, prep, inventory, movements, costs) a
 - Each server process keeps **one** `LISTEN` connection (`lib/realtime.ts`) and streams changes to browsers over Server-Sent Events: `/admin/events` (signed-in admins) and `/order/events` (guests — only "menu changed" and their own order's status; no order data).
 - The header shows **● Live** when this works. If the database connection can't `LISTEN` (e.g. `DIRECT_URL` points at the transaction pooler on port 6543), it shows **Every 15 s** and pages fall back to polling. A self-test notification confirms delivery when connecting and every minute.
 - On serverless hosts the event stream reconnects automatically when a function times out; a long-running `npm start` server is the best fit.
+
+## Simulated history from real-data patterns
+
+The shop's order history is **simulated**, but its patterns come from open datasets (all CC BY 4.0). Following the datasets' own rule, it borrows **patterns, never sales volumes**; every generated row has `is_simulated = true` and the admin shows a "Simulated data" banner with the attribution and a **Data sources** page.
+
+| Pattern | Dataset |
+|---|---|
+| Day-of-week shape and day-to-day swings per dish | Yaz restaurant, Stuttgart — 760 days (Taigel 2019, Mendeley Data) |
+| Items per order, food / drink mix, drinks' daily swings, hour-of-day curve | Indonesian F&B POS — 53,820 receipts (Engel et al. 2026, Mendeley Data) |
+| Shop size (RM 283 revenue per F&B worker per day × salaried staff) and growth trend | DOSM services statistics, F&B subsector 56 |
+| Seasons (JB busiest Dec / Jun, quietest Feb) | Imigresen: Singapore residents entering Johor |
+| Daily JB crowd surges on the exact date | KTMB Shuttle Tebrau ridership |
+
+- `scripts/build-patterns.ts` turns the raw CSVs into `data/real-patterns.json` (69 KB, committed). `scripts/lib/demo.ts` generates orders from it.
+- Seasons and crowd surges are applied at half strength (`JB_EXPOSURE = 0.5`), since a JB shop doesn't follow every Singapore visitor.
+- The simulated staff prepare a fixed weekday / weekend amount with a 10–30% buffer, ignoring busy Saturdays, holidays and crowd surges. That produces realistic leftovers and sell-outs for forecasting to improve on.
+- Limitation: the Indonesian dataset shows an identical item mix every hour and no weekday differences, so it appears anonymised. Only its order sizes, mix, daily swings and broad hour curve are used.
+- One year for the sample menu is about 46k orders and about 100 MB in the database. Use `--days=90` for a lighter demo.
+
+> Simulated shop. Patterns from Yaz restaurant sales data (Taigel 2019, Mendeley Data, CC BY 4.0) and an Indonesian F&B POS dataset (Engel et al. 2026, Mendeley Data, CC BY 4.0). Malaysian scale and JB crossings from DOSM, Imigresen and KTMB via data.gov.my (CC BY 4.0).
 
 ## Demand planning (BossBuddy)
 

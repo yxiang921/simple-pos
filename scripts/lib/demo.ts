@@ -5,6 +5,8 @@
  * list, missing row, day without data) — existing values are never overwritten.
  */
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { Prisma } from "../../lib/generated/prisma/client";
 import type { BaseUnit, ExpenseCategory } from "../../lib/generated/prisma/enums";
 import { prisma, table } from "../../lib/db";
@@ -255,7 +257,19 @@ export async function historyCoverage(windowDays: number, tz: string) {
   };
 }
 
-// ─── simulation ────────────────────────────────────────────────────────
+// ─── simulation (real-data patterns) ───────────────────────────────────
+//
+// Demand for item i on local date d:
+//   base_i × weekday_i(d) × swing_i(d) × JB season(month) × JB crowd wave(d) × F&B trend(d)
+// • base_i       shop size from DOSM (revenue per F&B worker per day × staff), split by the
+//                Indonesian POS food/snack/drink mix, then by item popularity weights
+// • weekday_i    Yaz restaurant day-of-week shape (by dish type; drinks use Yaz TOTAL)
+// • swing_i      real day-to-day swings: Yaz per dish (food), Indonesian POS (drinks)
+// • season       Imigresen Singapore → Johor arrivals by calendar month (JB exposure 0.5)
+// • wave         KTMB Tebrau shuttle ridership on that exact date vs its usual weekday (exposure 0.5)
+// • trend        DOSM F&B revenue by quarter, relative to the latest quarter
+// Order times follow the Indonesian POS hour curve; order sizes its items-per-receipt split.
+// Everything generated is flagged is_simulated = true.
 
 /** 32-bit FNV-1a, used to give each day / item its own deterministic random stream. */
 function hash32(s: string) {
@@ -280,14 +294,106 @@ function rng(seed: string) {
   return {
     rand,
     between: (lo: number, hi: number) => lo + (hi - lo) * rand(),
-    /** Approx. normal(0,1). */
-    gauss: () => rand() + rand() + rand() + rand() + rand() + rand() - 3,
     pick: <T>(xs: T[]) => xs[Math.floor(rand() * xs.length)],
   };
 }
 
-/** Weekday demand multipliers, Sun..Sat (getUTCDay order). */
-const DOW = [1.3, 0.85, 0.9, 0.95, 1.0, 1.15, 1.4];
+export type RealPatterns = {
+  version: number;
+  generatedAt: string;
+  attribution: string;
+  sources: { key: string; name: string; citation: string; url: string; license: string; used: string }[];
+  yaz: { days: number; from: string; to: string; dow: Record<string, number[]>; residual: Record<string, number[]>; share: Record<string, number> };
+  indonesia: {
+    receipts: number;
+    from: string;
+    to: string;
+    basket: Record<string, number>;
+    mix: { main: number; snack: number; drink: number };
+    hourly: { weekday: number[]; weekend: number[] };
+    dailyResidual: number[];
+  };
+  malaysia: {
+    fb: { quarters: number; latestQuarter: string; revenuePerEmployeeDay: number; trend: { quarter: string; index: number }[] };
+    arrivals: { from: string; to: string; seasonByMonth: number[] };
+    ktmb: { from: string; to: string; wave: Record<string, number> };
+  };
+};
+
+let patternsCache: RealPatterns | null = null;
+export function loadPatterns(): RealPatterns {
+  if (patternsCache) return patternsCache;
+  const file = path.join(process.cwd(), "data", "real-patterns.json");
+  if (!fs.existsSync(file)) {
+    throw new Error("data/real-patterns.json is missing. Run `npm run patterns:build -- --source=<bossbuddy-public-data folder>`.");
+  }
+  patternsCache = JSON.parse(fs.readFileSync(file, "utf8")) as RealPatterns;
+  return patternsCache;
+}
+
+/** How strongly a JB shop follows Singapore cross-border swings (0 = not at all, 1 = fully). */
+const JB_EXPOSURE = 0.5;
+
+export type ItemGroup = "main" | "snack" | "drink";
+
+export function itemGroup(name: string, category: string): ItemGroup {
+  const n = name.toLowerCase();
+  const c = category.toLowerCase();
+  if (/drink|minuman|beverage|coffee|tea/.test(c) || /\bteh\b|kopi|milo|latte|coffee|\btea\b|juice|\bjus\b|\bais\b|limau|water|soda|sirap/.test(n)) return "drink";
+  if (/breakfast|sarapan|dessert|pencuci|side|snack|kuih/.test(c) || /fries|roti|kuih|cendol|\begg|telur|cake|\bkek\b|pisang/.test(n)) return "snack";
+  return "main";
+}
+
+/** Which Yaz dish's weekday shape and swings a food item follows. */
+export function yazProfile(name: string): string {
+  const n = name.toLowerCase();
+  if (/chicken|ayam/.test(n)) return "HAEHNCHEN";
+  if (/prawn|udang|shrimp|kway teow/.test(n)) return "GARNELEN";
+  if (/calamari|sotong|squid/.test(n)) return "CALAMARI";
+  if (/fish|ikan/.test(n)) return "FISCH";
+  if (/lamb|kambing|mutton/.test(n)) return "LAMM";
+  if (/kofta|kofte|meatball|bebola/.test(n)) return "KOEFTE";
+  if (/beef|daging|steak/.test(n)) return "STEAK";
+  return "TOTAL";
+}
+
+const dayNumber = (d: string) => Math.round(Date.parse(`${d}T00:00:00Z`) / 864e5);
+/** Monday = 0 … Sunday = 6 */
+const mon0 = (d: string) => (new Date(`${d}T00:00:00Z`).getUTCDay() + 6) % 7;
+
+/** DOSM trend index at a date (linear between quarter midpoints), relative to `ref`. */
+function trendFactor(p: RealPatterns, d: string, ref: string) {
+  const pts = p.malaysia.fb.trend.map((q) => ({ t: dayNumber(q.quarter) + 45, v: q.index }));
+  const at = (day: string) => {
+    const t = dayNumber(day);
+    if (t <= pts[0].t) return pts[0].v;
+    if (t >= pts[pts.length - 1].t) return pts[pts.length - 1].v;
+    const i = pts.findIndex((x) => x.t >= t);
+    const a = pts[i - 1];
+    const b = pts[i];
+    return a.v + ((b.v - a.v) * (t - a.t)) / (b.t - a.t);
+  };
+  return at(d) / at(ref);
+}
+
+/** Market factors shared by all items on a date (season × crowd wave × trend). */
+export function marketFactor(p: RealPatterns, d: string, today: string) {
+  const season = 1 + JB_EXPOSURE * (p.malaysia.arrivals.seasonByMonth[Number(d.slice(5, 7)) - 1] - 1);
+  const w = p.malaysia.ktmb.wave[d];
+  const wave = w ? Math.min(1.5, Math.max(0.7, 1 + JB_EXPOSURE * (w - 1))) : 1;
+  return { season, wave, trend: trendFactor(p, d, today) };
+}
+
+/** Number of staff the shop is sized for: active salary entries in Costs (EPF/SOCSO lines excluded), else 4. */
+export async function staffCount(today: string): Promise<number> {
+  const rows = await prisma.expense.findMany({
+    where: { category: "STAFF", startDate: { lte: dateColumn(today) }, OR: [{ endDate: null }, { endDate: { gte: dateColumn(today) } }] },
+    select: { name: true },
+  });
+  const n = rows.filter((r) => !/epf|socso|eis|kwsp|perkeso/i.test(r.name)).length;
+  return n || 4;
+}
+
 const NAMES = [
   "Aisyah", "Ahmad", "Nurul", "Hafiz", "Siti", "Farah", "Amir", "Jason", "Wei Ming", "Mei Ling",
   "Kumar", "Priya", "Arun", "Kavitha", "Daniel", "Sarah", "Lim", "Tan", "Raj", "Zainab", "Irfan", "Hui Min",
@@ -299,48 +405,60 @@ const minutesOf = (hhmm: string) => {
 };
 const hhmmOf = (min: number) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 
-function sampleMinute(r: ReturnType<typeof rng>, open: number, close: number, morning: boolean) {
-  const peaks = morning
-    ? [{ at: 8 * 60 + 30, sd: 50, w: 0.75 }, { at: 12 * 60 + 30, sd: 60, w: 0.25 }]
-    : [
-        { at: 8 * 60 + 30, sd: 50, w: 0.25 },
-        { at: 12 * 60 + 45, sd: 55, w: 0.45 },
-        { at: 19 * 60, sd: 60, w: 0.3 },
-      ];
-  // 15% of customers arrive at any time while open; the rest around meal peaks.
-  if (r.rand() < 0.15) return Math.round(r.between(open, close - 5));
-  for (let tries = 0; tries < 20; tries++) {
-    let x = r.rand();
-    let peak = peaks[0];
-    for (const p of peaks) {
-      if ((x -= p.w) <= 0) {
-        peak = p;
-        break;
-      }
-    }
-    const m = Math.round(peak.at + r.gauss() * peak.sd);
-    if (m >= open && m < close - 5) return m;
-  }
-  return Math.round(r.between(open, close - 5));
+/** Hour weights from the Indonesian POS curve, limited to the shop's opening hours. */
+function hourWeights(curve: number[], open: number, close: number) {
+  const floor = Math.min(...curve.filter((x) => x > 0)) * 0.5; // hours the source shops weren't open
+  return Array.from({ length: 24 }, (_, h) => {
+    const overlap = Math.max(0, Math.min(close, (h + 1) * 60) - Math.max(open, h * 60)) / 60;
+    return overlap * (curve[h] > 0 ? curve[h] : floor);
+  });
 }
 
-export type SimulationResult = { days: string[]; orders: number; plates: number; prepRows: number; soldOuts: number; missed: number };
+function sampleMinute(r: ReturnType<typeof rng>, weights: number[], open: number, close: number) {
+  const total = weights.reduce((a, b) => a + b, 0);
+  let x = r.rand() * total;
+  let h = 0;
+  for (; h < 23; h++) {
+    if ((x -= weights[h]) <= 0) break;
+  }
+  const lo = Math.max(open, h * 60);
+  const hi = Math.min(close - 1, h * 60 + 59);
+  return Math.round(lo + r.rand() * Math.max(0, hi - lo));
+}
+
+/** Round randomly so small expected values aren't always rounded down. */
+const stochasticRound = (x: number, r: ReturnType<typeof rng>) => Math.floor(x) + (r.rand() < x - Math.floor(x) ? 1 : 0);
+
+export type SimulationResult = {
+  days: string[];
+  orders: number;
+  plates: number;
+  prepRows: number;
+  soldOuts: number;
+  missed: number;
+  staff: number;
+  targetRevenuePerDay: number;
+};
 
 /**
  * Generate simulated orders (+ items, ingredient snapshots), daily_prep for
- * prepared-ahead items, and sold-out events for the given local dates.
- * Deterministic per day. Never changes stock or inventory_movements; never
- * replaces real daily_prep rows.
+ * prepared-ahead items, and sold-out events for the given local dates, using the
+ * real-data patterns in data/real-patterns.json. Deterministic per day. Never
+ * changes stock or inventory_movements; never replaces real daily_prep rows.
  */
-export async function simulateDays(days: string[], opts: { windowDays: number; seed?: string }): Promise<SimulationResult> {
-  const empty = { days, orders: 0, plates: 0, prepRows: 0, soldOuts: 0, missed: 0 };
-  if (days.length === 0) return empty;
+export async function simulateDays(days: string[], opts: { windowDays: number; seed?: string; staff?: number }): Promise<SimulationResult> {
+  const p = loadPatterns();
   const seed = opts.seed ?? "pos-demo";
   const store = await storeInfo();
   const tz = store.tz;
   const open = minutesOf(store.openTime ?? DEMO_HOURS.openTime);
   const close = minutesOf(store.closeTime ?? DEMO_HOURS.closeTime);
   if (close - open < 120) throw new Error("Opening hours are shorter than 2 hours; set open/close time in Settings.");
+  const today = localDate(new Date(), tz);
+  const staff = opts.staff ?? (await staffCount(today));
+  const targetRevenuePerDay = p.malaysia.fb.revenuePerEmployeeDay * staff;
+  const empty = { days, orders: 0, plates: 0, prepRows: 0, soldOuts: 0, missed: 0, staff, targetRevenuePerDay };
+  if (days.length === 0) return empty;
 
   const items = await prisma.menuItem.findMany({
     where: { isArchived: false },
@@ -351,21 +469,55 @@ export async function simulateDays(days: string[], opts: { windowDays: number; s
   });
   if (!items.length) throw new Error("No menu items. Run `npm run db:seed` first.");
 
+  // ── Shop size: units per day so that average revenue matches DOSM × staff ──
+  const groups = new Map<ItemGroup, typeof items>();
+  for (const m of items) {
+    const g = itemGroup(m.name, m.category.name);
+    groups.set(g, [...(groups.get(g) ?? []), m]);
+  }
+  const mixSum = [...groups.keys()].reduce((s, g) => s + p.indonesia.mix[g], 0);
+  const weightOf = (m: (typeof items)[number]) => DEMO_MENU[m.name]?.baseDemand ?? 10;
+  const share = new Map<string, number>(); // share of all units sold
+  for (const [g, list] of groups) {
+    const wsum = list.reduce((s, m) => s + weightOf(m), 0);
+    for (const m of list) share.set(m.id, (p.indonesia.mix[g] / mixSum) * (weightOf(m) / wsum));
+  }
+  const avgPrice = items.reduce((s, m) => s + share.get(m.id)! * Number(m.price), 0);
+  const unitsPerDay = targetRevenuePerDay / Math.max(0.5, avgPrice);
+
+  const profile = new Map(
+    items.map((m) => {
+      const group = itemGroup(m.name, m.category.name);
+      const yaz = group === "drink" ? "TOTAL" : yazProfile(m.name);
+      return [
+        m.id,
+        {
+          group,
+          dow: p.yaz.dow[yaz],
+          swing: group === "drink" ? p.indonesia.dailyResidual : p.yaz.residual[yaz],
+          base: unitsPerDay * share.get(m.id)!,
+          // Staff habit: a fixed weekday and weekend amount with a safety buffer (+10–30%).
+          // It ignores busy Saturdays, holidays and JB crowd waves — that's what forecasting can fix.
+          prepBias: rng(`${seed}|bias|${m.id}`).between(1.1, 1.3),
+        },
+      ];
+    }),
+  );
+
+  const basket = Object.entries(p.indonesia.basket).map(([k, v]) => ({ size: Number(k), p: v }));
+  const pickBasket = (r: ReturnType<typeof rng>) => {
+    let x = r.rand();
+    for (const b of basket) if ((x -= b.p) <= 0) return b.size;
+    return basket[basket.length - 1].size;
+  };
+  const weekdayHours = hourWeights(p.indonesia.hourly.weekday, open, close);
+  const weekendHours = hourWeights(p.indonesia.hourly.weekend, open, close);
+
   const realPrep = await prisma.dailyPrep.findMany({
     where: { date: { in: days.map(dateColumn) }, isSimulated: false },
     select: { date: true, menuItemId: true },
   });
-  const realPrepKeys = new Set(realPrep.map((p) => `${p.date.toISOString().slice(0, 10)}|${p.menuItemId}`));
-
-  const profile = new Map(
-    items.map((m) => {
-      const base = DEMO_MENU[m.name]?.baseDemand ?? (m.isPreparedAhead ? 22 : 12);
-      const morning = /breakfast|sarapan/i.test(m.category.name) || /nasi lemak|roti|kopi|teh|telur|egg/i.test(m.name);
-      // Staff habit of over/under-prepping this dish: stable per item.
-      const prepBias = rng(`${seed}|bias|${m.id}`).between(0.95, 1.12);
-      return [m.id, { base, morning, prepBias }];
-    }),
-  );
+  const realPrepKeys = new Set(realPrep.map((x) => `${x.date.toISOString().slice(0, 10)}|${x.menuItemId}`));
 
   const orders: Prisma.OrderCreateManyInput[] = [];
   const orderItems: Prisma.OrderItemCreateManyInput[] = [];
@@ -373,23 +525,26 @@ export async function simulateDays(days: string[], opts: { windowDays: number; s
   const preps: Prisma.DailyPrepCreateManyInput[] = [];
   const soldOuts: Prisma.SoldOutEventCreateManyInput[] = [];
   const byItem = new Map(items.map((m) => [m.id, m]));
-  const today = localDate(new Date(), tz);
   let missed = 0;
 
   for (const day of [...days].sort()) {
     const r = rng(`${seed}|${day}`);
-    const dow = new Date(`${day}T00:00:00Z`).getUTCDay();
-    const daysAgo = Math.round((Date.parse(today) - Date.parse(day)) / 864e5);
-    const trend = 1 - 0.08 * Math.min(1, daysAgo / opts.windowDays); // slight growth over time
+    const w = mon0(day);
+    const weekend = w >= 5;
+    const mk = marketFactor(p, day, today);
+    const market = mk.season * mk.wave * mk.trend;
+    const hours = weekend ? weekendHours : weekdayHours;
     const units: { itemId: string; minute: number }[] = [];
 
     for (const m of items) {
-      const p = profile.get(m.id)!;
-      const demand = Math.max(0, Math.round(p.base * DOW[dow] * trend * (1 + r.gauss() * 0.15)));
-      const times = Array.from({ length: demand }, () => sampleMinute(r, open, close, p.morning)).sort((a, b) => a - b);
+      const pr = profile.get(m.id)!;
+      const swing = pr.swing[((dayNumber(day) % pr.swing.length) + pr.swing.length) % pr.swing.length];
+      const demand = stochasticRound(pr.base * pr.dow[w] * swing * market, r);
+      const times = Array.from({ length: demand }, () => sampleMinute(r, hours, open, close)).sort((a, b) => a - b);
       let sellable = times;
       if (m.isPreparedAhead) {
-        const plates = Math.max(0, Math.round(p.base * DOW[dow] * p.prepBias * (1 + r.gauss() * 0.1)));
+        const usual = weekend ? (pr.dow[5] + pr.dow[6]) / 2 : (pr.dow[0] + pr.dow[1] + pr.dow[2] + pr.dow[3] + pr.dow[4]) / 5;
+        const plates = Math.max(0, Math.round(pr.base * usual * mk.season * mk.trend * pr.prepBias));
         if (!realPrepKeys.has(`${day}|${m.id}`)) {
           preps.push({ id: randomUUID(), date: dateColumn(day), menuItemId: m.id, platesPrepared: plates, isSimulated: true });
         }
@@ -410,9 +565,8 @@ export async function simulateDays(days: string[], opts: { windowDays: number; s
 
     units.sort((a, b) => a.minute - b.minute);
     for (let i = 0; i < units.length; ) {
-      const size = r.pick([1, 1, 2, 2, 2, 3, 3, 4]);
-      const group = units.slice(i, i + size);
-      i += size;
+      const group = units.slice(i, i + pickBasket(r));
+      i += group.length;
       const createdAt = new Date(zonedTimeToUtc(day, hhmmOf(group[0].minute), tz).getTime() + Math.floor(r.rand() * 60) * 1000);
       const orderId = randomUUID();
       const qty = new Map<string, number>();
@@ -452,7 +606,7 @@ export async function simulateDays(days: string[], opts: { windowDays: number; s
       orders.push({
         id: orderId,
         customerName: r.pick(NAMES),
-        tableNumber: r.rand() < 0.7 ? String(1 + Math.floor(r.rand() * 20)) : null,
+        tableNumber: r.rand() < 0.7 ? String(1 + Math.floor(r.rand() * 12)) : null,
         status: "COMPLETED",
         paymentStatus: "PAID",
         totalAmount: total,
@@ -483,6 +637,8 @@ export async function simulateDays(days: string[], opts: { windowDays: number; s
     prepRows: preps.length,
     soldOuts: soldOuts.length,
     missed,
+    staff,
+    targetRevenuePerDay,
   };
 }
 
