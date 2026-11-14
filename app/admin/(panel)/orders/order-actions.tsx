@@ -21,6 +21,8 @@ export type OrderDetail = {
   totalAmount: string;
   createdAt: string;
   cancelReason: string | null;
+  /** Generated history: view only. */
+  isSimulated?: boolean;
   items: { id: string; name: string; quantity: number; unitPrice: string; subtotal: string }[];
   ingredients: { id: string; name: string; unit: BaseUnitCode; quantity: string }[];
 };
@@ -39,6 +41,7 @@ export function OrderActions({ order }: { order: OrderDetail }) {
   const [cancelOpen, setCancelOpen] = useState(false);
   const next = NEXT_STEP[order.status];
   const final = order.status === "COMPLETED" || order.status === "CANCELLED";
+  const readOnly = order.isSimulated === true;
 
   function run(key: string, fn: () => Promise<{ ok: boolean; error?: string }>, success: string) {
     setBusy(key);
@@ -52,7 +55,7 @@ export function OrderActions({ order }: { order: OrderDetail }) {
 
   return (
     <div className="flex items-center justify-end gap-1">
-      {next && (
+      {next && !readOnly && (
         <Button
           size="sm"
           variant="primary"
@@ -65,7 +68,7 @@ export function OrderActions({ order }: { order: OrderDetail }) {
           {busy === "next" ? <Loader2 className="animate-spin" /> : next.label}
         </Button>
       )}
-      {order.status !== "CANCELLED" && (
+      {order.status !== "CANCELLED" && !readOnly && (
         <Button
           size="sm"
           disabled={pending}
@@ -84,7 +87,7 @@ export function OrderActions({ order }: { order: OrderDetail }) {
       <Button size="icon" variant="ghost" className="size-7" aria-label="View order" title="View" onClick={() => setViewOpen(true)}>
         <Eye />
       </Button>
-      {!final && (
+      {!final && !readOnly && (
         <Button
           size="icon"
           variant="ghost"

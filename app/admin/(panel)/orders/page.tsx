@@ -7,71 +7,90 @@ import { formatDateTime, formatOrderNumber, formatRM, ORDER_STATUS_LABEL, ORDER_
 import { Badge, EmptyState, PageHeader, Panel, Table, TD, TH, THead, TR } from "@/components/ui/misc";
 import { Input } from "@/components/ui/form";
 import { buttonClass } from "@/components/ui/button";
+import { Pagination, readPaging } from "@/components/ui/pagination";
+import { dayRangeUtc, DEFAULT_TZ } from "@/lib/time";
 import { OrderStatusBadge } from "./status-badge";
 import { OrderActions, type OrderDetail } from "./order-actions";
 
 export const metadata: Metadata = { title: "Orders" };
 
-const PAGE_SIZE = 25;
 const FILTERS = [
+  { key: "ALL", label: "All" },
   { key: "ACTIVE", label: "Active" },
   ...ORDER_STATUSES.map((s) => ({ key: s, label: ORDER_STATUS_LABEL[s] })),
-  { key: "ALL", label: "All" },
 ];
+
+const isoDay = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : "");
 
 export default async function OrdersPage({ searchParams }: PageProps<"/admin/orders">) {
   const sp = await searchParams;
-  const filter = typeof sp.status === "string" && FILTERS.some((f) => f.key === sp.status) ? sp.status : "ACTIVE";
+  // Opens on "All" so every record (including the order history) is visible; "Active" is the kitchen queue.
+  const filter = typeof sp.status === "string" && FILTERS.some((f) => f.key === sp.status) ? sp.status : "ALL";
   const q = typeof sp.q === "string" ? sp.q.trim().slice(0, 60) : "";
-  const page = Math.max(1, Number(sp.page) || 1);
+  const from = isoDay(sp.from);
+  const to = isoDay(sp.to);
+  const { page: requestedPage, size } = readPaging(sp);
+  // Simulated history is shown (with a badge) unless hidden.
+  const hideSim = sp.sim === "hide";
 
-  // Simulated history (is_simulated) is hidden unless asked for, so the live queue stays clean.
-  const showSim = sp.sim === "1";
-  const where: Prisma.OrderWhereInput = showSim ? {} : { isSimulated: false };
-  if (filter === "ACTIVE") where.status = { in: ["PENDING", "PREPARING", "READY"] };
-  else if (filter !== "ALL") where.status = filter as OrderStatusCode;
+  const settings = await prisma.storeSetting.findUnique({ where: { id: 1 }, select: { timezone: true } });
+  const tz = settings?.timezone || DEFAULT_TZ;
+  const base: Prisma.OrderWhereInput = hideSim ? { isSimulated: false } : {};
+  if (from || to) {
+    base.createdAt = {
+      ...(from ? { gte: dayRangeUtc(from, tz).start } : {}),
+      ...(to ? { lt: dayRangeUtc(to, tz).end } : {}),
+    };
+  }
   if (q) {
     const num = Number(q.replace(/^#/, ""));
-    where.OR = [
+    base.OR = [
       { customerName: { contains: q, mode: "insensitive" } },
       { tableNumber: { equals: q, mode: "insensitive" } },
       ...(Number.isInteger(num) && num > 0 && num < 2 ** 31 ? [{ orderNumber: num }] : []),
     ];
   }
+  const where: Prisma.OrderWhereInput = { ...base };
+  if (filter === "ACTIVE") where.status = { in: ["PENDING", "PREPARING", "READY"] };
+  else if (filter !== "ALL") where.status = filter as OrderStatusCode;
 
-  const [orders, total, counts] = await Promise.all([
-    prisma.order.findMany({
-      where,
-      orderBy: { createdAt: filter === "ACTIVE" ? "asc" : "desc" },
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-      include: {
-        items: { orderBy: { menuItemNameSnapshot: "asc" } },
-        ingredients: { orderBy: { ingredientNameSnapshot: "asc" } },
-      },
-    }),
+  const [total, counts, simCount] = await Promise.all([
     prisma.order.count({ where }),
-    prisma.order.groupBy({ by: ["status"], where: showSim ? {} : { isSimulated: false }, _count: true }),
+    prisma.order.groupBy({ by: ["status"], where: base, _count: true }),
+    prisma.order.count({ where: { isSimulated: true } }),
   ]);
+  const pages = Math.max(1, Math.ceil(total / size));
+  const page = Math.min(requestedPage, pages); // a page past the end shows the last page
+  const orders = await prisma.order.findMany({
+    where,
+    orderBy: [{ createdAt: filter === "ACTIVE" ? "asc" : "desc" }, { orderNumber: "desc" }],
+    skip: (page - 1) * size,
+    take: size,
+    include: {
+      items: { orderBy: { menuItemNameSnapshot: "asc" } },
+      ingredients: { orderBy: { ingredientNameSnapshot: "asc" } },
+    },
+  });
   const countBy = Object.fromEntries(counts.map((c) => [c.status, c._count])) as Record<string, number>;
+  const allCount = Object.values(countBy).reduce((a, b) => a + b, 0);
   const activeCount = (countBy.PENDING ?? 0) + (countBy.PREPARING ?? 0) + (countBy.READY ?? 0);
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const href = (params: Record<string, string | number | undefined>) => {
+  const params = { status: filter, q, from, to, sim: hideSim ? "hide" : undefined, size: size === 25 ? undefined : String(size) };
+  const href = (over: Record<string, string | number | undefined>) => {
     const u = new URLSearchParams();
-    const merged = { status: filter, q, page: 1, sim: showSim ? "1" : undefined, ...params };
-    for (const [k, v] of Object.entries(merged)) if (v !== undefined && v !== "" && !(k === "page" && v === 1)) u.set(k, String(v));
+    for (const [k, v] of Object.entries({ ...params, page: 1, ...over }))
+      if (v !== undefined && v !== "" && !(k === "page" && v === 1) && !(k === "size" && String(v) === "25")) u.set(k, String(v));
     return `/admin/orders?${u.toString()}`;
   };
 
   return (
     <>
-      <PageHeader title="Orders" description="Live order queue — new orders and status changes appear automatically." />
+      <PageHeader title="Orders" description="All orders, newest first — new orders and status changes appear automatically. Use Active for the kitchen queue." />
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-px overflow-hidden rounded-[4px] border border-line-strong bg-line-strong">
           {FILTERS.map((f) => {
-            const n = f.key === "ACTIVE" ? activeCount : f.key === "ALL" ? undefined : countBy[f.key];
+            const n = f.key === "ACTIVE" ? activeCount : f.key === "ALL" ? allCount : countBy[f.key];
             return (
               <Link
                 key={f.key}
@@ -82,29 +101,45 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
                 )}
               >
                 {f.label}
-                {n !== undefined && <span className={clsx("tabular text-[12px]", filter === f.key ? "text-white/80" : "text-muted")}>{n}</span>}
+                <span className={clsx("tabular text-[12px]", filter === f.key ? "text-white/80" : "text-muted")}>{(n ?? 0).toLocaleString()}</span>
               </Link>
             );
           })}
         </div>
-        <form className="flex gap-2" action="/admin/orders">
+        <form className="flex flex-wrap items-center gap-2" action="/admin/orders">
           <input type="hidden" name="status" value={filter} />
-          {showSim && <input type="hidden" name="sim" value="1" />}
-          <Input name="q" defaultValue={q} placeholder="Order #, customer or table" className="h-8 w-60" aria-label="Search orders" />
+          {hideSim && <input type="hidden" name="sim" value="hide" />}
+          {size !== 25 && <input type="hidden" name="size" value={size} />}
+          <Input name="q" defaultValue={q} placeholder="Order #, customer or table" className="h-8 w-52" aria-label="Search orders" />
+          <Input name="from" type="date" defaultValue={from} className="h-8 w-36" aria-label="From date" />
+          <span className="text-muted">–</span>
+          <Input name="to" type="date" defaultValue={to} className="h-8 w-36" aria-label="To date" />
           <button className={buttonClass("secondary")} type="submit">
-            Search
+            Filter
           </button>
-          <Link href={href({ sim: showSim ? undefined : "1" })} className={buttonClass("ghost")}>
-            {showSim ? "Hide simulated" : "Show simulated"}
-          </Link>
+          {(q || from || to) && (
+            <Link href={href({ q: undefined, from: undefined, to: undefined })} className={buttonClass("ghost")}>
+              Clear
+            </Link>
+          )}
         </form>
       </div>
+      {simCount > 0 && (
+        <p className="mb-2 text-[12px] text-muted">
+          {hideSim ? "Simulated history is hidden. " : `Includes ${simCount.toLocaleString()} simulated orders (marked “Simulated”). `}
+          <Link href={href({ sim: hideSim ? undefined : "hide" })} className="text-primary hover:underline">
+            {hideSim ? "Show simulated orders" : "Hide simulated orders"}
+          </Link>
+        </p>
+      )}
 
       <Panel>
         {orders.length === 0 ? (
           <EmptyState
-            title={q ? "No matching orders" : filter === "ACTIVE" ? "No active orders" : "No orders"}
-            description={filter === "ACTIVE" && !q ? "New guest orders will appear here automatically." : undefined}
+            title={q || from || to ? "No matching orders" : filter === "ACTIVE" ? "No active orders" : "No orders"}
+            description={
+              q || from || to ? "Try clearing the search or date range." : filter === "ACTIVE" ? "New guest orders will appear here automatically." : undefined
+            }
           />
         ) : (
           <Table>
@@ -133,6 +168,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
                   totalAmount: o.totalAmount.toFixed(2),
                   createdAt: o.createdAt.toISOString(),
                   cancelReason: o.cancelReason,
+                  isSimulated: o.isSimulated,
                   items: o.items.map((i) => ({
                     id: i.id,
                     name: i.menuItemNameSnapshot,
@@ -179,25 +215,15 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
         )}
       </Panel>
 
-      {pages > 1 && (
-        <div className="mt-3 flex items-center justify-between text-[13px] text-muted">
-          <span>
-            Page {page} of {pages} · {total} orders
-          </span>
-          <div className="flex gap-2">
-            {page > 1 && (
-              <Link className={buttonClass("secondary", "sm")} href={href({ page: page - 1 })}>
-                Previous
-              </Link>
-            )}
-            {page < pages && (
-              <Link className={buttonClass("secondary", "sm")} href={href({ page: page + 1 })}>
-                Next
-              </Link>
-            )}
-          </div>
-        </div>
-      )}
+      <Pagination
+        page={page}
+        size={size}
+        total={total}
+        noun="orders"
+        action="/admin/orders"
+        hidden={{ status: filter, q, from, to, sim: hideSim ? "hide" : undefined }}
+        href={({ page: p, size: z }) => href({ page: p, ...(z ? { size: String(z) } : {}) })}
+      />
     </>
   );
 }

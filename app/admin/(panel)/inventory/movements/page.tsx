@@ -6,11 +6,11 @@ import { prisma } from "@/lib/db";
 import { formatDateTime, formatOrderNumber, formatQty, MOVEMENT_TYPE_LABEL, type BaseUnitCode } from "@/lib/format";
 import { Select } from "@/components/ui/form";
 import { buttonClass } from "@/components/ui/button";
+import { Pagination, readPaging } from "@/components/ui/pagination";
 import { Badge, EmptyState, PageHeader, Panel, Table, TD, TH, THead, TR } from "@/components/ui/misc";
 
 export const metadata: Metadata = { title: "Stock movements" };
 
-const PAGE_SIZE = 50;
 const TYPES = ["INITIAL", "RESTOCK", "ORDER_DEDUCTION", "ORDER_CANCELLATION", "ADJUSTMENT"] as const;
 const TYPE_TONE: Record<string, "neutral" | "green" | "warning" | "danger" | "outline"> = {
   INITIAL: "outline",
@@ -24,7 +24,7 @@ export default async function MovementsPage({ searchParams }: PageProps<"/admin/
   const sp = await searchParams;
   const ingredientId = typeof sp.ingredient === "string" ? sp.ingredient : "";
   const type = typeof sp.type === "string" && (TYPES as readonly string[]).includes(sp.type) ? (sp.type as (typeof TYPES)[number]) : "";
-  const page = Math.max(1, Number(sp.page) || 1);
+  const { page, size } = readPaging(sp, 50);
 
   const where: Prisma.InventoryMovementWhereInput = {};
   if (ingredientId) where.ingredientId = ingredientId;
@@ -34,8 +34,8 @@ export default async function MovementsPage({ searchParams }: PageProps<"/admin/
     prisma.inventoryMovement.findMany({
       where,
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
+      skip: (page - 1) * size,
+      take: size,
       include: {
         ingredient: { select: { name: true, unit: true } },
         order: { select: { orderNumber: true } },
@@ -44,11 +44,11 @@ export default async function MovementsPage({ searchParams }: PageProps<"/admin/
     prisma.inventoryMovement.count({ where }),
     prisma.ingredient.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const href = (p: number) => {
+  const href = ({ page: p = 1, size: z = size }: { page?: number; size?: number }) => {
     const u = new URLSearchParams();
     if (ingredientId) u.set("ingredient", ingredientId);
     if (type) u.set("type", type);
+    if (z !== 50) u.set("size", String(z));
     if (p > 1) u.set("page", String(p));
     return `/admin/inventory/movements?${u}`;
   };
@@ -142,25 +142,15 @@ export default async function MovementsPage({ searchParams }: PageProps<"/admin/
         )}
       </Panel>
 
-      {pages > 1 && (
-        <div className="mt-3 flex items-center justify-between text-[13px] text-muted">
-          <span>
-            Page {page} of {pages} · {total} movements
-          </span>
-          <div className="flex gap-2">
-            {page > 1 && (
-              <Link className={buttonClass("secondary", "sm")} href={href(page - 1)}>
-                Previous
-              </Link>
-            )}
-            {page < pages && (
-              <Link className={buttonClass("secondary", "sm")} href={href(page + 1)}>
-                Next
-              </Link>
-            )}
-          </div>
-        </div>
-      )}
+      <Pagination
+        page={page}
+        size={size}
+        total={total}
+        noun="movements"
+        action="/admin/inventory/movements"
+        hidden={{ ingredient: ingredientId || undefined, type: type || undefined }}
+        href={href}
+      />
     </>
   );
 }

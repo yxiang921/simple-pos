@@ -34,7 +34,8 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
   const today = localDate(new Date(), tz);
   const thisMonth = today.slice(0, 7);
   const month = typeof sp.month === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(sp.month) ? sp.month : thisMonth;
-  const includeSim = sp.sim === "1";
+  // Simulated history is counted by default (the banner says so); ?sim=exclude leaves it out.
+  const includeSim = sp.sim !== "exclude";
 
   const [summary, expenses, simCount] = await Promise.all([
     monthSummary(month, tz, includeSim),
@@ -44,7 +45,7 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
 
   const q = (params: Record<string, string | undefined>) => {
     const u = new URLSearchParams();
-    const merged = { month, sim: includeSim ? "1" : undefined, ...params };
+    const merged = { month, sim: includeSim ? undefined : "exclude", ...params };
     for (const [k, v] of Object.entries(merged)) if (v) u.set(k, v);
     return `/admin/costs?${u}`;
   };
@@ -129,7 +130,7 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
           {month === thisMonth && <span className="text-[12px] text-muted">Month to date for sales; overheads for the full month</span>}
         </div>
         {simCount > 0 && (
-          <Link href={q({ sim: includeSim ? undefined : "1" })} className="text-[13px] text-primary hover:underline">
+          <Link href={q({ sim: includeSim ? "exclude" : undefined })} className="text-[13px] text-primary hover:underline">
             {includeSim ? "Exclude simulated demo orders" : "Include simulated demo orders"}
           </Link>
         )}
