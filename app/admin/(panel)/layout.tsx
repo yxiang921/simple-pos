@@ -11,10 +11,9 @@ export const dynamic = "force-dynamic";
 
 export default async function PanelLayout({ children }: LayoutProps<"/admin">) {
   const admin = await requireAdmin();
-  const [settings, pending, simulated] = await Promise.all([
+  const [settings, pending] = await Promise.all([
     prisma.storeSetting.findUnique({ where: { id: 1 } }),
     prisma.order.count({ where: { status: "PENDING" } }),
-    prisma.order.findFirst({ where: { isSimulated: true }, select: { id: true } }),
   ]);
   const storeName = settings?.storeName ?? "Restaurant POS";
 
@@ -83,18 +82,6 @@ export default async function PanelLayout({ children }: LayoutProps<"/admin">) {
             </div>
           </header>
           <MobileNav pendingOrders={pending} />
-          {simulated && (
-            <div className="flex flex-wrap items-center gap-x-2 border-b border-warning/25 bg-warning-soft px-4 py-1.5 text-[12px] text-warning md:px-6">
-              <span className="font-semibold">Simulated data</span>
-              <span>
-                Order history, prep and some costs are simulated. Patterns from Yaz restaurant (Taigel 2019), an Indonesian F&amp;B POS (Engel et al.
-                2026), DOSM, Imigresen and KTMB — CC BY 4.0.
-              </span>
-              <a href="/admin/data-sources" className="font-medium underline underline-offset-2">
-                Sources
-              </a>
-            </div>
-          )}
           <main className="flex-1 px-4 py-5 md:px-6">{children}</main>
         </div>
       </div>

@@ -9,6 +9,9 @@ import { Input } from "@/components/ui/form";
 import { buttonClass } from "@/components/ui/button";
 import { Pagination, readPaging } from "@/components/ui/pagination";
 import { dayRangeUtc, DEFAULT_TZ } from "@/lib/time";
+import { normalizeTableNumber } from "@/lib/floor";
+import { tableNumberVariants } from "@/lib/services/floor";
+import { X } from "lucide-react";
 import { OrderStatusBadge } from "./status-badge";
 import { OrderActions, type OrderDetail } from "./order-actions";
 
@@ -32,8 +35,16 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
   const { page: requestedPage, size } = readPaging(sp);
   // Simulated history is shown (with a badge) unless hidden.
   const hideSim = sp.sim === "hide";
+  // ?table=5 → orders for that table (any spelling, e.g. "T05"); ?table=none → takeaway / no table.
+  const table = typeof sp.table === "string" ? sp.table.trim().slice(0, 20) : "";
+  const tableKey = table === "none" ? "none" : normalizeTableNumber(table);
 
-  const settings = await prisma.storeSetting.findUnique({ where: { id: 1 }, select: { timezone: true } });
+  const [settings, floorTables, variants] = await Promise.all([
+    prisma.storeSetting.findUnique({ where: { id: 1 }, select: { timezone: true } }),
+    prisma.floorObject.findMany({ where: { kind: "TABLE" }, select: { tableNumber: true, label: true } }),
+    tableKey && tableKey !== "none" ? tableNumberVariants(tableKey) : Promise.resolve([] as string[]),
+  ]);
+  const onFloor = new Map(floorTables.map((t) => [t.tableNumber!, t.label]));
   const tz = settings?.timezone || DEFAULT_TZ;
   const base: Prisma.OrderWhereInput = hideSim ? { isSimulated: false } : {};
   if (from || to) {
@@ -42,6 +53,8 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
       ...(to ? { lt: dayRangeUtc(to, tz).end } : {}),
     };
   }
+  if (tableKey === "none") base.tableNumber = null;
+  else if (tableKey) base.tableNumber = { in: variants.length ? variants : ["\u0000"] };
   if (q) {
     const num = Number(q.replace(/^#/, ""));
     base.OR = [
@@ -54,10 +67,9 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
   if (filter === "ACTIVE") where.status = { in: ["PENDING", "PREPARING", "READY"] };
   else if (filter !== "ALL") where.status = filter as OrderStatusCode;
 
-  const [total, counts, simCount] = await Promise.all([
+  const [total, counts] = await Promise.all([
     prisma.order.count({ where }),
     prisma.order.groupBy({ by: ["status"], where: base, _count: true }),
-    prisma.order.count({ where: { isSimulated: true } }),
   ]);
   const pages = Math.max(1, Math.ceil(total / size));
   const page = Math.min(requestedPage, pages); // a page past the end shows the last page
@@ -75,7 +87,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
   const allCount = Object.values(countBy).reduce((a, b) => a + b, 0);
   const activeCount = (countBy.PENDING ?? 0) + (countBy.PREPARING ?? 0) + (countBy.READY ?? 0);
 
-  const params = { status: filter, q, from, to, sim: hideSim ? "hide" : undefined, size: size === 25 ? undefined : String(size) };
+  const params = { status: filter, q, from, to, table: tableKey ?? undefined, sim: hideSim ? "hide" : undefined, size: size === 25 ? undefined : String(size) };
   const href = (over: Record<string, string | number | undefined>) => {
     const u = new URLSearchParams();
     for (const [k, v] of Object.entries({ ...params, page: 1, ...over }))
@@ -110,6 +122,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
           <input type="hidden" name="status" value={filter} />
           {hideSim && <input type="hidden" name="sim" value="hide" />}
           {size !== 25 && <input type="hidden" name="size" value={size} />}
+          {tableKey && <input type="hidden" name="table" value={tableKey} />}
           <Input name="q" defaultValue={q} placeholder="Order #, customer or table" className="h-8 w-52" aria-label="Search orders" />
           <Input name="from" type="date" defaultValue={from} className="h-8 w-36" aria-label="From date" />
           <span className="text-muted">–</span>
@@ -124,19 +137,28 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
           )}
         </form>
       </div>
-      {simCount > 0 && (
-        <p className="mb-2 text-[12px] text-muted">
-          {hideSim ? "Simulated history is hidden. " : `Includes ${simCount.toLocaleString()} simulated orders (marked “Simulated”). `}
-          <Link href={href({ sim: hideSim ? undefined : "hide" })} className="text-primary hover:underline">
-            {hideSim ? "Show simulated orders" : "Hide simulated orders"}
-          </Link>
-        </p>
+
+      {tableKey && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-[13px]">
+          <span className="inline-flex h-7 items-center gap-1.5 rounded-[4px] border border-primary bg-primary-soft px-2 font-medium text-primary">
+            {tableKey === "none" ? "No table (takeaway / counter)" : (onFloor.get(tableKey) ?? `Table ${tableKey}`)}
+            <Link href={href({ table: undefined })} aria-label="Clear table filter" className="hover:text-primary-hover">
+              <X className="size-3.5" />
+            </Link>
+          </span>
+          {tableKey !== "none" && onFloor.has(tableKey) && (
+            <Link href={`/admin/floor?table=${encodeURIComponent(tableKey)}`} className="text-primary hover:underline">
+              Show on floor
+            </Link>
+          )}
+          {tableKey !== "none" && !onFloor.has(tableKey) && <span className="text-muted">This table isn&apos;t on the floor plan.</span>}
+        </div>
       )}
 
       <Panel>
         {orders.length === 0 ? (
           <EmptyState
-            title={q || from || to ? "No matching orders" : filter === "ACTIVE" ? "No active orders" : "No orders"}
+            title={q || from || to || tableKey ? "No matching orders" : filter === "ACTIVE" ? "No active orders" : "No orders"}
             description={
               q || from || to ? "Try clearing the search or date range." : filter === "ACTIVE" ? "New guest orders will appear here automatically." : undefined
             }
@@ -163,6 +185,10 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
                   orderNumber: o.orderNumber,
                   customerName: o.customerName,
                   tableNumber: o.tableNumber,
+                  floorTable: (() => {
+                    const key = normalizeTableNumber(o.tableNumber);
+                    return key && onFloor.has(key) ? key : null;
+                  })(),
                   status: o.status,
                   paymentStatus: o.paymentStatus,
                   totalAmount: o.totalAmount.toFixed(2),
@@ -187,7 +213,19 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
                   <TR key={o.id} className={o.status === "CANCELLED" ? "text-muted" : undefined}>
                     <TD className="tabular font-medium">{formatOrderNumber(o.orderNumber)}</TD>
                     <TD className="max-w-[160px] truncate">{o.customerName}</TD>
-                    <TD>{o.tableNumber ?? <span className="text-muted">—</span>}</TD>
+                    <TD>
+                      {(() => {
+                        const key = normalizeTableNumber(o.tableNumber);
+                        if (!key) return <span className="text-muted">—</span>;
+                        return onFloor.has(key) ? (
+                          <Link href={`/admin/floor?table=${encodeURIComponent(key)}`} className="text-primary hover:underline" title="Show on floor">
+                            {o.tableNumber}
+                          </Link>
+                        ) : (
+                          <span title="Not on the floor plan">{o.tableNumber}</span>
+                        );
+                      })()}
+                    </TD>
                     <TD className="max-w-[300px]">
                       <span className="line-clamp-2">
                         {o.items.map((i) => `${i.quantity}× ${i.menuItemNameSnapshot}`).join(", ")}

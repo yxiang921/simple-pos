@@ -4,6 +4,7 @@ import type { BaseUnit, OrderStatus } from "@/lib/generated/prisma/enums";
 import { prisma, table, type TxClient } from "@/lib/db";
 import { DomainError, InsufficientStockError, isUniqueViolation, type StockShortage } from "@/lib/errors";
 import { createOrderSchema, type CreateOrderInput } from "@/lib/validation";
+import { normalizeTableNumber } from "@/lib/floor";
 
 const D = Prisma.Decimal;
 type Decimal = Prisma.Decimal;
@@ -84,9 +85,23 @@ export async function createOrder(raw: CreateOrderInput): Promise<CreatedOrder> 
     if (qty > 50) throw new DomainError("Maximum 50 of the same item per order.");
   }
 
+  // When the shop has a floor plan, the table must be one of its tables; it is
+  // stored in its standard form ("T05" → "5") so the order always matches the floor.
+  let tableNumber = input.tableNumber;
+  if (tableNumber) {
+    const tables = await prisma.floorObject.findMany({ where: { kind: "TABLE" }, select: { tableNumber: true } });
+    if (tables.length) {
+      const key = normalizeTableNumber(tableNumber);
+      if (!key || !tables.some((t) => t.tableNumber === key)) {
+        throw new DomainError(`Table ${tableNumber} isn't one of our tables. Please choose your table from the list.`, "UNKNOWN_TABLE");
+      }
+      tableNumber = key;
+    }
+  }
+
   const requestHash = hashRequest({
     customerName: input.customerName,
-    tableNumber: input.tableNumber,
+    tableNumber,
     lines,
   });
 
@@ -158,7 +173,7 @@ export async function createOrder(raw: CreateOrderInput): Promise<CreatedOrder> 
       const order = await tx.order.create({
         data: {
           customerName: input.customerName,
-          tableNumber: input.tableNumber,
+          tableNumber,
           totalAmount: total,
           idempotencyKey: input.idempotencyKey,
           requestHash,

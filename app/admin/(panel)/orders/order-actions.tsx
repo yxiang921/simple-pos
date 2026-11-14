@@ -21,6 +21,8 @@ export type OrderDetail = {
   totalAmount: string;
   createdAt: string;
   cancelReason: string | null;
+  /** Table number as it is on the floor plan, when the order's table is on it. */
+  floorTable?: string | null;
   /** Generated history: view only. */
   isSimulated?: boolean;
   items: { id: string; name: string; quantity: number; unitPrice: string; subtotal: string }[];

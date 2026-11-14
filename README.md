@@ -60,6 +60,7 @@ No secret is exposed to the browser — there are no `NEXT_PUBLIC_*` variables.
 | `npm run db:seed` | Seed admin + demo data (catalog is skipped if ingredients already exist) |
 | `npm run db:reset` | **Drops all data**, re-applies migrations and seeds |
 | `npm test` | Integration tests (needs `TEST_DATABASE_URL`) |
+| `npm run orders:close-pending` | Close every Pending order: COMPLETED by default, `-- --cancel` to cancel (returns stock), `-- --dry-run` to preview |
 | `npm run admin:password` | Create the admin, or reset its password, from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` |
 | `npm run db:check` | Read-only data check of the POS schema: migrations, menu, recipes, costs, history, prep, running costs — shows what is empty |
 | `npm run db:fill` | Check → fill everything still empty with **dummy** data (never overwrites) → check again. Writes `reports/db-fill-*.json`; undo with `npm run db:fill -- --undo=latest` |

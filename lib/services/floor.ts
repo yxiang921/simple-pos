@@ -101,3 +101,27 @@ export async function createSampleLayout(opts: { replace?: boolean } = {}) {
 }
 
 const round = (v: number) => Math.round(v * 1000) / 1000;
+
+export type TableOption = { tableNumber: string; label: string; seats: number | null };
+
+/** Tables on the floor plan, in natural order (1, 2, … 10, A1 …). */
+export async function listTables(): Promise<TableOption[]> {
+  const rows = await prisma.floorObject.findMany({
+    where: { kind: "TABLE", tableNumber: { not: null } },
+    select: { tableNumber: true, label: true, seats: true },
+  });
+  return rows
+    .map((r) => ({ tableNumber: r.tableNumber!, label: r.label, seats: r.seats }))
+    .sort((a, b) => a.tableNumber.localeCompare(b.tableNumber, undefined, { numeric: true }));
+}
+
+/**
+ * Raw table_number values on orders that mean the given table (orders may hold
+ * "T05", "5", "Table 5"…). Used to filter the Orders list by table.
+ */
+export async function tableNumberVariants(table: string): Promise<string[]> {
+  const key = normalizeTableNumber(table);
+  if (!key) return [];
+  const rows = await prisma.order.groupBy({ by: ["tableNumber"], where: { tableNumber: { not: null } } });
+  return rows.map((r) => r.tableNumber!).filter((v) => normalizeTableNumber(v) === key);
+}
