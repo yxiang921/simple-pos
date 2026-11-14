@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { ArrowRight, Loader2, PackageCheck, Plus, Sparkles, Trash2 } from "lucide-react";
+import { ArrowRight, Loader2, PackageCheck, PackageX, Plus, Sparkles, Trash2 } from "lucide-react";
 import { clsx } from "clsx";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Field, FormError, Input, Select, Textarea } from "@/components/ui/form";
@@ -64,29 +64,36 @@ export function StockInForm({
   const used = new Set(lines.map((l) => l.ingredientId).filter(Boolean));
   const filled = lines.filter((l) => l.ingredientId && Number(l.quantity) > 0);
   const totalCents = lines.reduce((s, l) => s + (l.lineCost ? toCents(l.lineCost) : 0), 0);
+  // Out of stock: nothing left at this branch (or never stocked here). Low: above 0 but at / below the low-stock level.
+  const out = ingredients.filter((i) => {
+    const s = i.stock[branchId];
+    return !s || Number(s.current) <= 0;
+  });
   const low = ingredients.filter((i) => {
     const s = i.stock[branchId];
-    return s && Number(s.current) <= Number(s.low) && Number(s.low) > 0;
+    return s && Number(s.current) > 0 && Number(s.current) <= Number(s.low) && Number(s.low) > 0;
   });
 
-  function addLowStock() {
-    const add = low
+  /** Add lines for these ingredients with a suggested quantity: up to twice the low-stock level (blank when no level is set). */
+  function addSuggested(list: StockInIngredient[], what: string) {
+    const add = list
       .filter((i) => !used.has(i.id))
       .map((i) => {
         const s = i.stock[branchId];
-        // Suggest enough to reach twice the low-stock level, in a friendly unit.
-        const need = Math.max(0, Number(s.low) * 2 - Number(s.current));
+        const need = s ? Math.max(0, Number(s.low) * 2 - Number(s.current)) : 0;
         const big = i.unit !== "PCS" && need >= 1000;
         return {
           key: nextKey++,
           ingredientId: i.id,
-          quantity: big ? String(Math.ceil(need / 100) / 10) : String(Math.ceil(need)),
+          quantity: need > 0 ? (big ? String(Math.ceil(need / 100) / 10) : String(Math.ceil(need))) : "",
           inputUnit: big ? (i.unit === "G" ? "kg" : "L") : BASE_UNIT_LABEL[i.unit],
           lineCost: "",
         };
       });
-    if (!add.length) return toast("No low-stock ingredients to add at this branch.", "error");
+    if (!add.length) return toast(`No ${what} ingredients left to add at this branch.`, "error");
     setLines((ls) => [...ls.filter((l) => l.ingredientId), ...add]);
+    const blanks = add.filter((l) => !l.quantity).length;
+    toast(`Added ${add.length} ${what} ingredient${add.length === 1 ? "" : "s"}${blanks ? ` — enter the quantity for ${blanks} without a low-stock level` : ""}`);
   }
 
   function submit() {
@@ -120,8 +127,17 @@ export function StockInForm({
         <PanelHeader
           title="Items received"
           actions={
-            <div className="flex gap-1.5">
-              <Button size="sm" onClick={addLowStock} disabled={!low.length} title="Add every low-stock ingredient at this branch">
+            <div className="flex flex-wrap justify-end gap-1.5">
+              <Button
+                size="sm"
+                variant={out.length ? "danger-outline" : "secondary"}
+                onClick={() => addSuggested(out, "out-of-stock")}
+                disabled={!out.length}
+                title="Add every ingredient with no stock left at this branch"
+              >
+                <PackageX /> Out of stock{out.length ? ` (${out.length})` : ""}
+              </Button>
+              <Button size="sm" onClick={() => addSuggested(low, "low-stock")} disabled={!low.length} title="Add every low-stock ingredient at this branch">
                 <Sparkles /> Low stock{low.length ? ` (${low.length})` : ""}
               </Button>
               <Button size="sm" onClick={() => setLines((ls) => [...ls, blank()])}>
@@ -194,7 +210,9 @@ export function StockInForm({
                 <div className="col-span-2 text-[12px] leading-tight text-muted md:col-span-1">
                   {ing && s ? (
                     <>
-                      <span className="tabular">{formatQty(s.current, ing.unit)}</span>
+                      <span className={clsx("tabular", Number(s.current) <= 0 && "font-semibold text-danger")}>
+                        {Number(s.current) <= 0 ? "Out" : formatQty(s.current, ing.unit)}
+                      </span>
                       {after !== null && (
                         <>
                           <ArrowRight className="mx-1 inline size-3 text-subtle" />
