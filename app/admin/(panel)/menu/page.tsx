@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { idParam, textParam } from "@/lib/params";
 import { Plus } from "lucide-react";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { prisma } from "@/lib/db";
@@ -19,8 +20,8 @@ export default async function MenuPage({ searchParams }: PageProps<"/admin/menu"
   const ctx = await requireContext();
   const branchId = ctx.branch?.id ?? null;
   const activeBranches = ctx.branches.filter((b) => b.isActive);
-  const q = typeof sp.q === "string" ? sp.q.trim().slice(0, 60) : "";
-  const categoryId = typeof sp.category === "string" ? sp.category : "";
+  const q = textParam(sp.q);
+  const categoryId = idParam(sp.category);
 
   const where: Prisma.MenuItemWhereInput = { merchantId: ctx.merchant.id, isArchived: false };
   if (q) where.name = { contains: q, mode: "insensitive" };

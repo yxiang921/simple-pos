@@ -92,11 +92,18 @@ export function AreaChart({
       )}
     </svg>
       <div className="relative mt-2 h-4 text-[11px] text-subtle">
-        {ticks.map(({ d, i }) => (
-          <span key={d.label} className="tabular absolute -translate-x-1/2" style={{ left: `${(x(i) / W) * 100}%` }}>
-            {d.label}
-          </span>
-        ))}
+        {ticks.map(({ d, i }) => {
+          const pos = (x(i) / W) * 100;
+          return (
+            <span
+              key={d.label}
+              className={`tabular absolute whitespace-nowrap ${pos < 4 ? "" : pos > 92 ? "-translate-x-full" : "-translate-x-1/2"}`}
+              style={{ left: `${pos}%` }}
+            >
+              {d.label}
+            </span>
+          );
+        })}
       </div>
     </div>
   );

@@ -60,6 +60,7 @@ export default async function DashboardPage() {
       sub: hourly.change === null ? "Before payment" : `${hourly.change >= 0 ? "▲" : "▼"} ${Math.abs(Math.round(hourly.change * 100))}% vs last week, same time`,
       icon: <TrendingUp />,
       tone: "success",
+      href: "/admin/sales?period=today",
     },
     {
       label: "Pending orders",

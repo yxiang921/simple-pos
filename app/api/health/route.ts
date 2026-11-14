@@ -4,7 +4,7 @@ import { dbSchema } from "@/lib/db-schema";
 export const dynamic = "force-dynamic";
 
 /** Newest migration this build expects. Keep in sync with prisma/migrations. */
-const LATEST_MIGRATION = "20261116000000_saas_multi_tenant";
+const LATEST_MIGRATION = "20261117000000_stock_in";
 
 /**
  * GET /api/health — deployment check. Reports which part of the setup is

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { costPerBaseUnit } from "@/lib/units";
 import { createSampleLayout } from "@/lib/services/floor";
 import { DEMO_COSTS, DEMO_HOURS, DEMO_MENU } from "@/scripts/demo-catalog";
+import { samplePhotoFor } from "@/lib/menu-photos";
 
 /**
  * Sample café catalog (a small Malaysian kopitiam menu). Used by `npm run
@@ -300,6 +301,7 @@ export async function installSampleCatalog(
             description: m.description,
             price: D(m.price),
             categoryId: cats.get(m.category)!,
+            imageUrl: samplePhotoFor(m.name),
             isPreparedAhead: DEMO_MENU[m.name]?.preparedAhead ?? null,
             aliases: DEMO_MENU[m.name]?.aliases ?? [],
             recipe: {

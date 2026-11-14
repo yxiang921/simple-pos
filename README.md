@@ -70,6 +70,7 @@ No secret is exposed to the browser.
 | `npm run admin:password` | Create an owner account (for the first merchant, or `-- --merchant=<slug>`), or reset its password, from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` |
 | `npm run db:check` | Read-only data check of one merchant (`-- --merchant=<slug>`, default the first): migrations, menu, recipes, costs, stock and history per branch, prep, running costs — shows what is empty |
 | `npm run db:fill` | Check → fill everything still empty with **dummy** data (never overwrites) → check again. Writes `reports/db-fill-*.json`; undo with `npm run db:fill -- --undo=latest` |
+| `npm run demo:photos` | Give the sample-menu dishes a photo (Wikimedia Commons, free licences — credits shown on the guest menu and in Data sources). Only items without a photo; `-- --replace` to overwrite, `-- --merchant=<slug>` for one merchant |
 | `npm run demo:history` | Generate a year of **simulated** order / prep / sold-out history per branch from real-data patterns (flagged `is_simulated`, stock untouched). `-- --merchant=<slug>`, `-- --branch=<slug>`, `-- --reset`, `-- --remove`, `-- --days=90`, `-- --scale=0.6` |
 | `npm run patterns:build -- --source="…/bossbuddy-public-data"` | Rebuild `data/real-patterns.json` from the public datasets (only needed if the datasets change) |
 
@@ -160,6 +161,21 @@ Each ingredient has a base unit — **pcs**, **g** or **ml** — and all stock m
 - **Isolation**: every page, server action and SSE stream is scoped to the signed-in merchant (`lib/tenant.ts` — `requireContext()`, `branchFilter()`, `assert*()`); ids from the browser are checked for ownership. Guest URLs only show that branch's menu and that branch's orders.
 - **Branches page**: guest link per branch (copy / open), orders, sales, open orders, items switched off, last order; add, rename, change URL name, close (HQ can't be closed).
 - **Data model**: `merchants`, `branches` (one `is_headquarters` per merchant), `ingredient_stocks (branch_id, ingredient_id)`, `branch_menu_items`; `merchant_id` on settings / categories / menu items / ingredients / expenses / floor objects / owner accounts; `branch_id` on orders / movements / daily prep / sold-out events. Names, SKUs and table numbers are unique per merchant. Migration `20261116000000_saas_multi_tenant` moves an existing single-shop database into one merchant with a headquarters branch — nothing is lost.
+
+## Stock in (`/admin/inventory/stock-in`)
+
+Record a delivery from a supplier in one step: several ingredients with quantity (g / kg, ml / L, pcs) and optionally the RM paid per line, plus supplier, invoice / DO number, date received and a note. **Low stock** adds every low-stock ingredient of the branch with a suggested quantity (up to twice the low-stock level). Everything is added in one transaction to the branch's stock; each line is a `RESTOCK` stock movement linked to the delivery (`stock_receipts`, migration `20261117000000_stock_in`). With *Update ingredient costs* on, a line cost also sets the ingredient's cost per unit used by Costs. The list shows deliveries, spend this month and suppliers; each delivery has its own page.
+
+## Sales history (`/admin/sales`)
+
+Sales for **Today, Yesterday, This week, Last week, Last 7 days, This month, Last month, Last 30 / 90 days, This year, Last year** or any custom date range, for the selected branch or all branches. Each period is compared with the matching earlier one (same day last week, the week / month / year before, or the previous N days):
+
+- Sales, orders, average order and items sold, each with the change in %.
+- A chart by hour (one day), by day (up to 92 days) or by month, with the earlier period as a dashed line; best day / hour, busiest weekday, per-day average.
+- Top 10 items with share and change, sales by branch (HQ view) or by weekday, and a weekday × hour heatmap.
+- **Export CSV**: one row per day (orders, sales, average order, cancelled).
+
+Cancelled orders are not counted as sales. Logic: `lib/services/sales.ts`.
 
 ## Live floor view (`/admin/floor`)
 

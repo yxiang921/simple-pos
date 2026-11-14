@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { textParam } from "@/lib/params";
 import Link from "next/link";
 import { clsx } from "clsx";
 import { Prisma } from "@/lib/generated/prisma/client";
@@ -7,7 +8,8 @@ import { requireContext } from "@/lib/tenant";
 import { stockStatus, type StockStatus } from "@/lib/services/inventory";
 import { COST_UNIT, formatDateTime, formatQty, formatQtyHint, formatRM, BASE_UNIT_LABEL, type BaseUnitCode } from "@/lib/format";
 import { Input } from "@/components/ui/form";
-import { buttonClass } from "@/components/ui/button";
+import { ButtonLink, buttonClass } from "@/components/ui/button";
+import { PackagePlus } from "lucide-react";
 import { Badge, EmptyState, PageHeader, Panel, segmentClass, segmentedClass, Table, TD, TH, THead, TR } from "@/components/ui/misc";
 import { IngredientToolbar, IngredientRowActions, type BranchChoice, type IngredientRow } from "./ingredient-dialogs";
 
@@ -32,7 +34,7 @@ const FILTERS = [
 export default async function IngredientsPage({ searchParams }: PageProps<"/admin/ingredients">) {
   const sp = await searchParams;
   const filter = typeof sp.filter === "string" && FILTERS.some((f) => f.key === sp.filter) ? sp.filter : "all";
-  const q = typeof sp.q === "string" ? sp.q.trim().slice(0, 60) : "";
+  const q = textParam(sp.q);
   const ctx = await requireContext();
   const branchId = ctx.branch?.id ?? null;
   const multi = ctx.branches.length > 1;
@@ -86,7 +88,14 @@ export default async function IngredientsPage({ searchParams }: PageProps<"/admi
               : "Total stock across all branches. Status shows the worst branch. Choose a branch at the top to see one branch's stock."
             : "Ingredient stock in base units (pcs, g, ml). Orders deduct automatically from recipes."
         }
-        actions={<IngredientToolbar branches={choice} />}
+        actions={
+          <>
+            <ButtonLink href="/admin/inventory/stock-in/new">
+              <PackagePlus /> Stock in
+            </ButtonLink>
+            <IngredientToolbar branches={choice} />
+          </>
+        }
       />
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">

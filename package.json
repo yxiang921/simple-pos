@@ -18,6 +18,7 @@
     "admin:password": "tsx scripts/set-admin-password.ts",
     "demo:history": "tsx scripts/simulate-history.ts",
     "demo:branches": "tsx scripts/demo-branches.ts",
+    "demo:photos": "tsx scripts/menu-photos.ts",
     "db:check": "tsx scripts/check-data.ts",
     "db:fill": "tsx scripts/check-data.ts --fill",
     "patterns:build": "tsx scripts/build-patterns.ts",

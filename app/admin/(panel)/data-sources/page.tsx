@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { prisma } from "@/lib/db";
 import { patternSummary } from "@/lib/patterns";
 import { requireContext } from "@/lib/tenant";
+import { MENU_PHOTOS, photoCredit, photoUrl } from "@/lib/menu-photos";
 import { EmptyState, PageHeader, Panel, PanelHeader, Table, TD, TH, THead, TR } from "@/components/ui/misc";
 
 export const metadata: Metadata = { title: "Data sources" };
@@ -112,6 +113,36 @@ export default async function DataSourcesPage() {
                   </li>
                 </ul>
               </div>
+            </Panel>
+            <Panel>
+              <PanelHeader title="Menu photos (sample menu)" />
+              <p className="px-5 pt-3 text-[13px] text-muted">
+                From Wikimedia Commons under free licences; the credit is also shown under each photo on the guest menu. Add them to items without a photo with{" "}
+                <code className="text-ink">npm run demo:photos</code>.
+              </p>
+              <ul className="grid gap-2 p-4 sm:grid-cols-2">
+                {Object.entries(MENU_PHOTOS).map(([dish, p]) => {
+                  const c = photoCredit(photoUrl(p.file))!;
+                  return (
+                    <li key={dish} className="flex items-center gap-3 rounded-[12px] border border-line p-2 text-[12.5px]">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={photoUrl(p.file, 160)} alt="" loading="lazy" className="size-12 shrink-0 rounded-[9px] bg-fill object-cover" />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{dish}</span>
+                        <span className="block truncate text-muted">
+                          <a href={c.page} target="_blank" rel="noreferrer" className="hover:underline">
+                            {p.author}
+                          </a>{" "}
+                          ·{" "}
+                          <a href={c.licenseUrl} target="_blank" rel="noreferrer" className="hover:underline">
+                            {p.license}
+                          </a>
+                        </span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             </Panel>
           </div>
 

@@ -170,6 +170,38 @@ export const stockAdjustmentSchema = z.object({
   reason: trimmed(200).optional().default(""),
 });
 
+/** Stock in: one delivery with several lines. Line cost is the RM paid for that line (optional). */
+export const stockReceiptSchema = z.object({
+  branchId: idString.optional(),
+  supplier: trimmed(80).default(""),
+  reference: trimmed(60).default(""),
+  note: trimmed(300).default(""),
+  /** Local date the goods arrived (default today). */
+  receivedDate: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date")
+    .optional()
+    .or(z.literal("").transform(() => undefined)),
+  updateCosts: z.boolean().default(true),
+  lines: z
+    .array(
+      z.object({
+        ingredientId: idString,
+        quantity: positiveQuantityString,
+        inputUnit: inputUnitSchema,
+        lineCost: z
+          .union([moneyString, z.literal("")])
+          .nullish()
+          .transform((v) => (v ? v : null)),
+      }),
+    )
+    .min(1, "Add at least one ingredient")
+    .max(80, "Too many lines in one delivery")
+    .refine((ls) => new Set(ls.map((l) => l.ingredientId)).size === ls.length, "Each ingredient can appear only once"),
+});
+export type StockReceiptInput = z.output<typeof stockReceiptSchema>;
+
 // ─── Menu ──────────────────────────────────────────────────────────────
 
 export const recipeLineSchema = z.object({

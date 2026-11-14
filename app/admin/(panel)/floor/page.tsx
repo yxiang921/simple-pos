@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { textParam } from "@/lib/params";
 import { getFloorData } from "@/lib/services/floor";
 import { normalizeTableNumber } from "@/lib/floor";
 import { requireContext } from "@/lib/tenant";
@@ -23,7 +24,7 @@ export default async function FloorPage({ searchParams }: PageProps<"/admin/floo
       </>
     );
   }
-  const focusTable = typeof sp.table === "string" ? normalizeTableNumber(sp.table) : null;
+  const focusTable = normalizeTableNumber(textParam(sp.table, 20));
   const data = await getFloorData(ctx.merchant.id, ctx.branch.id);
   const multi = ctx.branches.length > 1;
   return (

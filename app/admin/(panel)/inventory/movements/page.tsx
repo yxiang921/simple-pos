@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { idParam } from "@/lib/params";
 import Link from "next/link";
 import { clsx } from "clsx";
 import type { Prisma } from "@/lib/generated/prisma/client";
@@ -25,7 +26,7 @@ export default async function MovementsPage({ searchParams }: PageProps<"/admin/
   const sp = await searchParams;
   const ctx = await requireContext();
   const overview = !ctx.branch;
-  const ingredientId = typeof sp.ingredient === "string" ? sp.ingredient : "";
+  const ingredientId = idParam(sp.ingredient);
   const type = typeof sp.type === "string" && (TYPES as readonly string[]).includes(sp.type) ? (sp.type as (typeof TYPES)[number]) : "";
   const { page, size } = readPaging(sp, 50);
 
@@ -43,6 +44,7 @@ export default async function MovementsPage({ searchParams }: PageProps<"/admin/
         ingredient: { select: { name: true, unit: true } },
         order: { select: { orderNumber: true } },
         branch: { select: { name: true } },
+        receipt: { select: { id: true, receiptNumber: true } },
       },
     }),
     prisma.inventoryMovement.count({ where }),
@@ -108,7 +110,7 @@ export default async function MovementsPage({ searchParams }: PageProps<"/admin/
                 <TH>Type</TH>
                 <TH className="text-right">Change</TH>
                 <TH className="text-right">Balance</TH>
-                <TH>Order</TH>
+                <TH>Order / delivery</TH>
                 <TH>Reason</TH>
                 <TH>By</TH>
               </tr>
@@ -138,6 +140,10 @@ export default async function MovementsPage({ searchParams }: PageProps<"/admin/
                       {m.order ? (
                         <Link href={`/admin/orders?status=ALL&q=${m.order.orderNumber}`} className="text-primary hover:underline">
                           {formatOrderNumber(m.order.orderNumber)}
+                        </Link>
+                      ) : m.receipt ? (
+                        <Link href={`/admin/inventory/stock-in/${m.receipt.id}`} className="text-primary hover:underline">
+                          Delivery #{String(m.receipt.receiptNumber).padStart(4, "0")}
                         </Link>
                       ) : (
                         <span className="text-muted">—</span>

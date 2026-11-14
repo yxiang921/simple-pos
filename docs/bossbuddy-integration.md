@@ -98,6 +98,20 @@ Written automatically, in the same transaction, whenever an item goes from avail
 
 `store_settings` has one row per merchant (`merchant_id`), shared by all its branches.
 
+## Stock in — `stock_receipts` (migration `20261117000000_stock_in`, additive)
+
+| column | type | notes |
+|---|---|---|
+| `id` | text | |
+| `receipt_number` | int, unique | shown as #0001 |
+| `branch_id` | text → `branches.id` | branch that received the goods |
+| `supplier`, `reference`, `note` | text | reference = invoice / DO number |
+| `received_at` | timestamp (UTC) | |
+| `total_cost` | `numeric(12,2)`, nullable | sum of line costs; null when none entered |
+| `created_by`, `created_at` | | |
+
+Lines are `inventory_movements` rows with `movement_type = 'RESTOCK'`, `receipt_id` set and an optional `line_cost` (RM for that line). Purchase cost per base unit = `line_cost / quantity_change`.
+
 ## Running costs — `expenses`
 
 Rent, utilities, salaries etc., entered on **Admin → Costs** (migration `20261114010000_expenses`).

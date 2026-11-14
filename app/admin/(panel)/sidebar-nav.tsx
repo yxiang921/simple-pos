@@ -5,12 +5,14 @@ import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
 import {
   ArrowLeftRight,
+  ChartNoAxesCombined,
   Box,
   Building2,
   ClipboardList,
   Database,
   LayoutGrid,
   Package,
+  PackagePlus,
   ReceiptText,
   Settings,
   UtensilsCrossed,
@@ -35,12 +37,14 @@ const GROUPS: { title: string; items: Item[] }[] = [
     items: [
       { href: "/admin/menu", label: "Menu", icon: UtensilsCrossed },
       { href: "/admin/ingredients", label: "Inventory", icon: Package },
+      { href: "/admin/inventory/stock-in", label: "Stock in", icon: PackagePlus },
       { href: "/admin/inventory/movements", label: "Stock movements", icon: ArrowLeftRight },
     ],
   },
   {
     title: "Business",
     items: [
+      { href: "/admin/sales", label: "Sales", icon: ChartNoAxesCombined },
       { href: "/admin/costs", label: "Costs", icon: Wallet },
       { href: "/admin/branches", label: "Branches", icon: Building2 },
       { href: "/admin/settings", label: "Settings", icon: Settings },

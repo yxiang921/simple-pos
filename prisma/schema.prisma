@@ -52,6 +52,7 @@ model Branch {
   orders         Order[]
   stocks         IngredientStock[]
   movements      InventoryMovement[]
+  receipts       StockReceipt[]
   dailyPreps     DailyPrep[]
   soldOutEvents  SoldOutEvent[]
   menuStatus     BranchMenuItem[]
@@ -343,13 +344,41 @@ model InventoryMovement {
   reason         String
   createdBy      String?      @map("created_by")
   createdAt      DateTime     @default(now()) @map("created_at")
+  /// Stock-in delivery this restock belongs to (null for single restocks / orders).
+  receiptId      String?      @map("receipt_id")
+  receipt        StockReceipt? @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  /// Purchase cost of this line in RM (stock-in only, optional).
+  lineCost       Decimal?     @map("line_cost") @db.Decimal(12, 2)
 
   @@index([branchId, createdAt])
   @@index([ingredientId, createdAt])
   @@index([orderId])
+  @@index([receiptId])
   @@index([movementType])
   @@index([createdAt])
   @@map("inventory_movements")
+}
+
+// ─── Stock in (deliveries) ─────────────────────────────────────────────
+
+/// One delivery received at a branch; its lines are RESTOCK inventory_movements with receipt_id.
+model StockReceipt {
+  id            String              @id @default(cuid())
+  receiptNumber Int                 @unique @default(autoincrement()) @map("receipt_number")
+  branchId      String              @map("branch_id")
+  branch        Branch              @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  supplier      String              @default("")
+  reference     String              @default("")
+  note          String              @default("")
+  receivedAt    DateTime            @default(now()) @map("received_at")
+  /// Sum of line costs (RM); null when no line had a cost.
+  totalCost     Decimal?            @map("total_cost") @db.Decimal(12, 2)
+  createdBy     String?             @map("created_by")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  lines         InventoryMovement[]
+
+  @@index([branchId, receivedAt])
+  @@map("stock_receipts")
 }
 
 // ─── Demand planning (read by BossBuddy) ───────────────────────────────

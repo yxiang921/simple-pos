@@ -8,6 +8,7 @@ import type { GuestMenu, GuestMenuItem } from "@/lib/services/menu";
 import { centsToString, formatRM, toCents } from "@/lib/format";
 import { Dialog } from "@/components/ui/dialog";
 import { MAX_PER_ITEM, useCart, useCartActions } from "./cart-store";
+import { photoCredit } from "@/lib/menu-photos";
 import { saveGuestPrefs, useShop } from "./shop-context";
 
 export function MenuBrowser({ menu, acceptingOrders }: { menu: GuestMenu; acceptingOrders: boolean }) {
@@ -283,7 +284,12 @@ function ItemDialog({
   return (
     <Dialog open onClose={onClose} title={item.name} width="sm">
       <div className="space-y-4">
-        {item.imageUrl && <ItemImage item={item} className="aspect-[4/3] w-full" />}
+        {item.imageUrl && (
+          <figure>
+            <ItemImage item={item} className="aspect-[4/3] w-full" />
+            <PhotoCredit url={item.imageUrl} />
+          </figure>
+        )}
         {item.description && <p className="text-[14px] leading-relaxed text-muted">{item.description}</p>}
         <div className="flex items-baseline justify-between">
           <p className="tabular text-[18px] font-semibold">{formatRM(item.price)}</p>
@@ -314,5 +320,23 @@ function ItemDialog({
         )}
       </div>
     </Dialog>
+  );
+}
+
+/** "Photo: author · licence" for the free sample photos (required attribution). */
+function PhotoCredit({ url }: { url: string }) {
+  const c = photoCredit(url);
+  if (!c) return null;
+  return (
+    <figcaption className="mt-1.5 text-right text-[11px] text-subtle">
+      Photo:{" "}
+      <a href={c.page} target="_blank" rel="noreferrer" className="hover:underline">
+        {c.author}
+      </a>{" "}
+      ·{" "}
+      <a href={c.licenseUrl} target="_blank" rel="noreferrer" className="hover:underline">
+        {c.license}
+      </a>
+    </figcaption>
   );
 }

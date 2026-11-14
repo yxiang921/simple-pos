@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { textParam } from "@/lib/params";
 import Link from "next/link";
 import { clsx } from "clsx";
 import type { Prisma } from "@/lib/generated/prisma/client";
@@ -34,14 +35,14 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
   const overview = !ctx.branch;
   // Opens on "All" so every record (including the order history) is visible; "Active" is the kitchen queue.
   const filter = typeof sp.status === "string" && FILTERS.some((f) => f.key === sp.status) ? sp.status : "ALL";
-  const q = typeof sp.q === "string" ? sp.q.trim().slice(0, 60) : "";
+  const q = textParam(sp.q);
   const from = isoDay(sp.from);
   const to = isoDay(sp.to);
   const { page: requestedPage, size } = readPaging(sp);
   // Generated history (is_simulated) is listed like any other order; ?sim=hide leaves it out.
   const hideSim = sp.sim === "hide";
   // ?table=5 → orders for that table (any spelling, e.g. "T05"); ?table=none → takeaway / no table.
-  const table = typeof sp.table === "string" ? sp.table.trim().slice(0, 20) : "";
+  const table = textParam(sp.table, 20);
   const tableKey = table === "none" ? "none" : normalizeTableNumber(table);
 
   const [floorTables, variants] = await Promise.all([
@@ -63,7 +64,8 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
     };
   }
   if (tableKey === "none") base.tableNumber = null;
-  else if (tableKey) base.tableNumber = { in: variants.length ? variants : ["\u0000"] };
+  // No order was ever placed at this table: an empty IN list matches nothing (a NUL placeholder would make PostgreSQL reject the query).
+  else if (tableKey) base.tableNumber = { in: variants };
   if (q) {
     const num = Number(q.replace(/^#/, ""));
     base.OR = [

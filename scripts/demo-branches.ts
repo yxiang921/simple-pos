@@ -25,6 +25,7 @@ import { dayRangeUtc, localDate } from "../lib/time";
 import { fillEmptyFields, historyCoverage, resolveTarget, simulateDays, storeInfo } from "./lib/demo";
 import { branchScale, DEMO_SECOND_MERCHANT, ensureDemoBranches, ensureSecondMerchant, placeOpenOrders } from "./lib/demo-tenants";
 import { requireCurrentClient } from "./lib/client-check";
+import { fillMenuPhotos } from "./lib/photos";
 
 const args = new Map(
   process.argv.slice(2).map((a) => {
@@ -75,6 +76,8 @@ async function main() {
   }
 
   await fillEmptyFields({ windowDays: Math.max(DAYS, 365), merchantId: merchant.id });
+  const photos = await fillMenuPhotos({ merchantId: merchant.id });
+  if (photos) console.log(`✓ Menu photos added to ${photos} item(s)`);
   const created = await ensureDemoBranches(merchant.id);
   console.log(created.length ? `✓ Branches added: ${created.join(", ")}` : "• Demo branches already exist");
   await fillBranches(merchant.id, merchant.slug);
