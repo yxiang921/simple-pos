@@ -61,6 +61,7 @@ export function LiveUpdates({
       poll = null;
     };
 
+    let planned = false; // the server ended the stream on purpose (serverless time limit)
     const es = new EventSource(url);
     es.addEventListener("status", (e) => {
       const { status } = JSON.parse((e as MessageEvent).data) as { status: string };
@@ -69,10 +70,21 @@ export function LiveUpdates({
         setState("live");
         if (missed) refresh();
         missed = false;
-      } else startPolling();
+      } else if (status === "unavailable") startPolling();
+      // "connecting": a fresh server instance is starting its listener; keep the current state.
     });
     es.addEventListener("change", () => refresh());
-    es.onerror = () => startPolling(); // EventSource reconnects on its own; poll meanwhile
+    es.addEventListener("bye", () => {
+      planned = true;
+    });
+    es.onopen = () => {
+      planned = false;
+    };
+    es.onerror = () => {
+      // EventSource reconnects on its own. After a planned close nothing was missed; otherwise poll meanwhile.
+      if (planned) return;
+      startPolling();
+    };
 
     const onVisible = () => {
       if (document.visibilityState === "visible" && (missed || poll)) refresh();

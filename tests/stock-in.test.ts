@@ -83,3 +83,20 @@ describe("stock in", () => {
     await expect(receive(T.branchId, { lines: [{ ingredientId: theirs.id, quantity: "1", inputUnit: "g" }] })).rejects.toThrow(/no longer exists/);
   });
 });
+
+describe("stock in — large deliveries", () => {
+  it("receives 40 lines in one go with correct balances", async () => {
+    const ings = await Promise.all(
+      Array.from({ length: 40 }, (_, i) => createIngredient({ name: `Item ${i}`, unit: "G", currentStock: i, lowStockThreshold: 0 })),
+    );
+    const r = await receive(T.branchId, {
+      lines: ings.map((g, i) => ({ ingredientId: g.id, quantity: "1.5", inputUnit: "kg", lineCost: i % 2 ? "3.00" : "" })),
+    });
+    expect(r.lines).toBe(40);
+    expect(r.totalCost).toBe("60.00");
+    expect(await stockOf(ings[7].id)).toBe("1507");
+    const m = await prisma.inventoryMovement.findFirstOrThrow({ where: { receiptId: r.id, ingredientId: ings[7].id } });
+    expect(m.balanceAfter.toString()).toBe("1507");
+    expect((await prisma.ingredient.findUniqueOrThrow({ where: { id: ings[1].id } })).costPerUnit!.toString()).toBe("0.002");
+  });
+});

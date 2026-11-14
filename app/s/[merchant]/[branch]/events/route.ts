@@ -5,6 +5,8 @@ import { sseResponse } from "@/lib/sse";
 import { getGuestShop } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
+// Streams end after ~50 s on Vercel (see lib/sse.ts); the browser reconnects.
+export const maxDuration = 60;
 
 /** Merchant-wide tables whose changes affect what guests see (prices, recipes, ordering paused). */
 const MENU_TABLES = new Set(["menu_items", "categories", "ingredients", "menu_item_ingredients", "store_settings"]);

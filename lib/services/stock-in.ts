@@ -1,10 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { prisma, table } from "@/lib/db";
 import { DomainError } from "@/lib/errors";
 import { costPerBaseUnit, toBaseUnit } from "@/lib/units";
 import { localDate, zonedTimeToUtc } from "@/lib/time";
 import type { StockReceiptInput } from "@/lib/validation";
+import { changeBranchStock, lockBranchStock } from "@/lib/services/orders";
 
 const D = Prisma.Decimal;
 
@@ -41,59 +41,65 @@ export async function receiveStock(branchId: string, input: StockReceiptInput, a
   const receivedAt = !input.receivedDate || input.receivedDate === today ? new Date() : zonedTimeToUtc(input.receivedDate, "12:00", timezone);
   const totalCost = lines.some((l) => l.cost) ? lines.reduce((s, l) => s.add(l.cost ?? 0), new D(0)) : null;
 
-  return prisma.$transaction(async (tx) => {
-    const receipt = await tx.stockReceipt.create({
-      data: {
-        branchId,
-        supplier: input.supplier,
-        reference: input.reference,
-        note: input.note,
-        receivedAt,
-        totalCost,
-        createdBy: actor,
-      },
-    });
-    const sorted = [...lines].sort((a, b) => a.ing.id.localeCompare(b.ing.id));
-    for (const l of sorted) {
+  // A handful of statements whatever the number of lines (each is a network round trip on hosted setups).
+  return prisma.$transaction(
+    async (tx) => {
+      const receipt = await tx.stockReceipt.create({
+        data: {
+          branchId,
+          supplier: input.supplier,
+          reference: input.reference,
+          note: input.note,
+          receivedAt,
+          totalCost,
+          createdBy: actor,
+        },
+      });
+      const sorted = [...lines].sort((a, b) => a.ing.id.localeCompare(b.ing.id));
+      const ids = sorted.map((l) => l.ing.id);
+
+      // Make sure every stock row exists, then lock them in a fixed order.
       await tx.$executeRaw`
         INSERT INTO ${table("ingredient_stocks")} (id, branch_id, ingredient_id, current_stock, low_stock_threshold, updated_at)
-        VALUES (${randomUUID()}, ${branchId}, ${l.ing.id}, 0, 0, now())
+        SELECT gen_random_uuid()::text, ${branchId}, v.id, 0, 0, now() FROM unnest(${ids}::text[]) AS v(id)
         ON CONFLICT (branch_id, ingredient_id) DO NOTHING`;
-    }
-    const locked = await tx.$queryRaw<{ ingredient_id: string; current_stock: string }[]>`
-      SELECT ingredient_id, current_stock::text AS current_stock FROM ${table("ingredient_stocks")}
-      WHERE branch_id = ${branchId} AND ingredient_id IN (${Prisma.join(sorted.map((l) => l.ing.id))})
-      ORDER BY ingredient_id FOR UPDATE`;
-    const current = new Map(locked.map((r) => [r.ingredient_id, new D(r.current_stock)]));
+      const locked = await lockBranchStock(tx, branchId, ids);
 
-    const label = `Stock in #${receipt.receiptNumber}${input.supplier ? ` · ${input.supplier}` : ""}${input.reference ? ` · ${input.reference}` : ""}`;
-    for (const l of sorted) {
-      const balance = (current.get(l.ing.id) ?? new D(0)).add(l.qty);
-      if (balance.gt(new D("99999999999.999"))) throw new DomainError(`Resulting stock of ${l.ing.name} is too large.`);
-      await tx.ingredientStock.update({
-        where: { branchId_ingredientId: { branchId, ingredientId: l.ing.id } },
-        data: { currentStock: { increment: l.qty } },
-      });
-      await tx.inventoryMovement.create({
-        data: {
+      const balances = new Map<string, Prisma.Decimal>();
+      for (const l of sorted) {
+        const balance = new D(locked.get(l.ing.id)?.current_stock ?? 0).add(l.qty);
+        if (balance.gt(new D("99999999999.999"))) throw new DomainError(`Resulting stock of ${l.ing.name} is too large.`);
+        balances.set(l.ing.id, balance);
+      }
+      await changeBranchStock(tx, branchId, sorted.map((l) => ({ ingredientId: l.ing.id, delta: l.qty })));
+
+      const label = `Stock in #${receipt.receiptNumber}${input.supplier ? ` · ${input.supplier}` : ""}${input.reference ? ` · ${input.reference}` : ""}`;
+      await tx.inventoryMovement.createMany({
+        data: sorted.map((l) => ({
           branchId,
           ingredientId: l.ing.id,
           receiptId: receipt.id,
-          movementType: "RESTOCK",
+          movementType: "RESTOCK" as const,
           quantityChange: l.qty,
-          balanceAfter: balance,
+          balanceAfter: balances.get(l.ing.id)!,
           lineCost: l.cost,
           reason: label,
           createdBy: actor,
           createdAt: receivedAt,
-        },
+        })),
       });
-      if (input.updateCosts && l.unitCost) {
-        await tx.ingredient.update({ where: { id: l.ing.id }, data: { costPerUnit: l.unitCost } });
+
+      const costed = input.updateCosts ? sorted.filter((l) => l.unitCost) : [];
+      if (costed.length) {
+        await tx.$executeRaw`
+          UPDATE ${table("ingredients")} AS i SET cost_per_unit = v.cost, updated_at = now()
+          FROM unnest(${costed.map((l) => l.ing.id)}::text[], ${costed.map((l) => l.unitCost!.toString())}::numeric[]) AS v(id, cost)
+          WHERE i.id = v.id`;
       }
-    }
-    return { id: receipt.id, receiptNumber: receipt.receiptNumber, lines: lines.length, totalCost: totalCost?.toFixed(2) ?? null };
-  });
+      return { id: receipt.id, receiptNumber: receipt.receiptNumber, lines: lines.length, totalCost: totalCost?.toFixed(2) ?? null };
+    },
+    { maxWait: 10_000, timeout: 30_000 },
+  );
 }
 
 /** Distinct supplier names used before by this merchant (for suggestions). */

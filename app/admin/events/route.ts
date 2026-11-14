@@ -3,6 +3,8 @@ import { changeHub } from "@/lib/realtime";
 import { sseResponse } from "@/lib/sse";
 
 export const dynamic = "force-dynamic";
+// Streams end after ~50 s on Vercel (see lib/sse.ts); the browser reconnects.
+export const maxDuration = 60;
 
 /** Live change stream for the back office (Server-Sent Events): only the signed-in merchant's changes. */
 export async function GET(request: Request) {

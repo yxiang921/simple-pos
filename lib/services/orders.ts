@@ -12,8 +12,37 @@ type Decimal = Prisma.Decimal;
 const TX_OPTIONS = {
   isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
   maxWait: 10_000,
-  timeout: 20_000,
+  timeout: 30_000,
 } as const;
+
+/**
+ * Add (positive) or remove (negative) stock for several ingredients of one
+ * branch in ONE statement. Rows must already be locked by lockBranchStock.
+ * A removal only applies where enough stock is left; returns the ingredient ids
+ * that were changed. Missing rows are created when adding.
+ */
+export async function changeBranchStock(tx: TxClient, branchId: string, changes: { ingredientId: string; delta: Decimal }[]) {
+  if (!changes.length) return new Set<string>();
+  const ids = changes.map((c) => c.ingredientId);
+  const deltas = changes.map((c) => c.delta.toString());
+  if (changes.every((c) => c.delta.gt(0))) {
+    const rows = await tx.$queryRaw<{ ingredient_id: string }[]>`
+      INSERT INTO ${table("ingredient_stocks")} AS s (id, branch_id, ingredient_id, current_stock, low_stock_threshold, updated_at)
+      SELECT gen_random_uuid()::text, ${branchId}, v.ingredient_id, v.delta, 0, now()
+      FROM unnest(${ids}::text[], ${deltas}::numeric[]) AS v(ingredient_id, delta)
+      ON CONFLICT (branch_id, ingredient_id)
+      DO UPDATE SET current_stock = s.current_stock + EXCLUDED.current_stock, updated_at = now()
+      RETURNING s.ingredient_id`;
+    return new Set(rows.map((r) => r.ingredient_id));
+  }
+  const rows = await tx.$queryRaw<{ ingredient_id: string }[]>`
+    UPDATE ${table("ingredient_stocks")} AS s
+    SET current_stock = s.current_stock + v.delta, updated_at = now()
+    FROM unnest(${ids}::text[], ${deltas}::numeric[]) AS v(ingredient_id, delta)
+    WHERE s.branch_id = ${branchId} AND s.ingredient_id = v.ingredient_id AND s.current_stock + v.delta >= 0
+    RETURNING s.ingredient_id`;
+  return new Set(rows.map((r) => r.ingredient_id));
+}
 
 export type CreatedOrder = { id: string; orderNumber: number; replayed: boolean };
 
@@ -209,17 +238,18 @@ export async function createOrder(branchId: string, raw: CreateOrderInput): Prom
       }
       if (shortages.length) throw new InsufficientStockError(shortages);
 
-      // Deduct with an atomic conditional update (defence in depth on top of the lock
-      // and the CHECK (current_stock >= 0) constraint).
+      // Deduct everything in one conditional update (defence in depth on top of the
+      // lock and the CHECK (current_stock >= 0) constraint).
       const movements: Prisma.InventoryMovementCreateManyInput[] = [];
       const snapshots: Prisma.OrderIngredientCreateManyInput[] = [];
+      const changed = await changeBranchStock(
+        tx,
+        branchId,
+        ingredientIds.map((id) => ({ ingredientId: id, delta: requirements.get(id)!.qty.neg() })),
+      );
       for (const id of ingredientIds) {
         const req = requirements.get(id)!;
-        const res = await tx.ingredientStock.updateMany({
-          where: { branchId, ingredientId: id, ingredient: { isActive: true }, currentStock: { gte: req.qty } },
-          data: { currentStock: { decrement: req.qty } },
-        });
-        if (res.count !== 1) {
+        if (!changed.has(id)) {
           throw new InsufficientStockError([
             {
               ingredientId: id,
@@ -303,13 +333,13 @@ export async function cancelOrder(orderId: string, reason: string, actor?: strin
         deducted.map((d) => d.ingredientId),
       );
       const movements: Prisma.InventoryMovementCreateManyInput[] = [];
+      // One statement for all ingredients (creates the stock row if it was removed since).
+      await changeBranchStock(
+        tx,
+        branchId,
+        deducted.map((d) => ({ ingredientId: d.ingredientId, delta: d.quantityDeducted })),
+      );
       for (const d of deducted) {
-        // The stock row exists (the order deducted from it); upsert covers rows removed since.
-        await tx.ingredientStock.upsert({
-          where: { branchId_ingredientId: { branchId, ingredientId: d.ingredientId } },
-          update: { currentStock: { increment: d.quantityDeducted } },
-          create: { branchId, ingredientId: d.ingredientId, currentStock: d.quantityDeducted },
-        });
         movements.push({
           branchId,
           ingredientId: d.ingredientId,

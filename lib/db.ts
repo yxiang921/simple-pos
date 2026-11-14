@@ -19,6 +19,10 @@ function createClient() {
   );
   return new PrismaClient({
     adapter,
+    // Interactive transactions: generous limits for hosted setups where each
+    // query is a network round trip (e.g. Vercel → Supabase in another region).
+    // Hot paths are batched into a handful of statements regardless.
+    transactionOptions: { maxWait: 10_000, timeout: 30_000 },
     // Expected failures (e.g. idempotency-key conflicts) are handled in code; tests stay quiet.
     log: process.env.NODE_ENV === "test" ? [] : process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
