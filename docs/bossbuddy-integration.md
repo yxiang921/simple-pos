@@ -85,6 +85,10 @@ Cost on a local date `d` (start ≤ d ≤ end): `DAILY` → amount; `WEEKLY` →
 
 Amount changes are stored as history: changing rent from 1 Dec ends the old row on 30 Nov and inserts a new row from 1 Dec, so past months stay correct. Reference implementation: `lib/services/expenses.ts` (`costOnDay`, `overheadsForRange`, `monthSummary`).
 
+## Live change notifications (optional)
+
+BossBuddy can react to changes instead of polling: `LISTEN pos_changes` on a session connection (port 5432). Each write to a POS table sends `{"schema":"pos","table":"orders","op":"INSERT"}` (one per statement); order status / payment changes also send `{"schema":"pos","table":"orders","op":"UPDATE","id":"…","status":"READY","paymentStatus":"UNPAID"}`. Filter on `schema`. Payloads never contain other data — re-read the table you care about.
+
 ## P2 — demo history
 
 `npm run demo:history` generates **35 days** (5 weeks, so every weekday appears ≥ 4×) before today:
@@ -102,6 +106,8 @@ npm run demo:history -- --remove      # delete all simulated data
 ```
 
 To exclude demo data: `where not is_simulated`.
+
+`npm run db:check` (read-only) lists what is still empty; `npm run db:fill` fills it with dummy values and simulated history and records every change in `reports/db-fill-*.json` (`--undo=latest` reverts values that haven't been edited since). Field-level dummy values (ingredient costs, `is_prepared_ahead`, aliases, store hours) have no flag column — the report file is the record of which values are dummy. Recipes are never invented.
 
 `--demo-defaults` (on by default; `--no-demo-defaults` to skip) fills **illustrative** values from `scripts/demo-catalog.ts` — ingredient costs, `is_prepared_ahead`, aliases, opening hours, and 13 running costs (only if `expenses` is empty, flagged `is_simulated`) — **only where the field is empty**, and only for the seeded Kopi & Co. items. Replace them with real figures when known.
 

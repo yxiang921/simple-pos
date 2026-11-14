@@ -6,7 +6,6 @@ import { clsx } from "clsx";
 import { Check } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { formatOrderNumber, formatRM, formatTime, ORDER_STATUS_LABEL } from "@/lib/format";
-import { AutoRefresh } from "@/components/auto-refresh";
 
 export const metadata: Metadata = { title: "Order placed", robots: { index: false } };
 
@@ -35,7 +34,6 @@ export default async function OrderSuccessPage({ params }: PageProps<"/order/suc
 
   return (
     <main className="mx-auto max-w-lg pb-12 sm:px-4 sm:pt-6">
-      {live && <AutoRefresh seconds={10} />}
       <section className="border-b border-line bg-surface px-5 py-6 text-center sm:rounded-[6px] sm:border">
         {!cancelled && (
           <span className="mx-auto mb-3 flex size-10 items-center justify-center rounded-[6px] bg-primary-soft text-primary">

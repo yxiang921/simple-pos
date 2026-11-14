@@ -7,7 +7,6 @@ import { formatDateTime, formatOrderNumber, formatRM, ORDER_STATUS_LABEL, ORDER_
 import { Badge, EmptyState, PageHeader, Panel, Table, TD, TH, THead, TR } from "@/components/ui/misc";
 import { Input } from "@/components/ui/form";
 import { buttonClass } from "@/components/ui/button";
-import { AutoRefresh } from "@/components/auto-refresh";
 import { OrderStatusBadge } from "./status-badge";
 import { OrderActions, type OrderDetail } from "./order-actions";
 
@@ -65,8 +64,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
 
   return (
     <>
-      <AutoRefresh seconds={20} />
-      <PageHeader title="Orders" description="Live order queue. Refreshes automatically every 20 seconds." />
+      <PageHeader title="Orders" description="Live order queue — new orders and status changes appear automatically." />
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-px overflow-hidden rounded-[4px] border border-line-strong bg-line-strong">

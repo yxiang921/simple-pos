@@ -12,12 +12,14 @@ export function StoreForm({
   openTime,
   closeTime,
   timezone,
+  orderAlertMinutes,
 }: {
   storeName: string;
   acceptingOrders: boolean;
   openTime: string;
   closeTime: string;
   timezone: string;
+  orderAlertMinutes: number;
 }) {
   const toast = useToast();
   const [state, action] = useActionState(saveSettingsAction, null);
@@ -43,6 +45,22 @@ export function StoreForm({
           <Input id="timezone" name="timezone" defaultValue={timezone} maxLength={64} />
         </Field>
       </div>
+      <Field
+        label="Order alert (minutes)"
+        htmlFor="orderAlertMinutes"
+        error={fe?.orderAlertMinutes}
+        hint="On the Floor view, a table with an open order turns from yellow to red over this time."
+      >
+        <Input
+          id="orderAlertMinutes"
+          name="orderAlertMinutes"
+          type="number"
+          min={1}
+          max={240}
+          defaultValue={orderAlertMinutes}
+          className="tabular w-28"
+        />
+      </Field>
       <div>
         <Checkbox name="acceptingOrders" defaultChecked={acceptingOrders} label="Accept new guest orders" />
         <p className="ml-6 mt-0.5 text-[12px] text-muted">Untick to pause ordering, e.g. at closing time.</p>

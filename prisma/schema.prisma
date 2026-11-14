@@ -48,6 +48,11 @@ model StoreSetting {
   openTime        String?  @map("open_time")
   closeTime       String?  @map("close_time")
   timezone        String   @default("Asia/Kuala_Lumpur")
+  /// Floor plan size in metres (3D floor view).
+  floorWidth      Float    @default(14) @map("floor_width")
+  floorDepth      Float    @default(10) @map("floor_depth")
+  /// An open order turns from yellow to fully red on the floor view after this many minutes.
+  orderAlertMinutes Int    @default(20) @map("order_alert_minutes")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("store_settings")
@@ -314,4 +319,47 @@ model Expense {
   @@index([category])
   @@index([startDate, endDate])
   @@map("expenses")
+}
+
+// ─── Floor plan (3D floor view) ────────────────────────────────────────
+
+enum FloorObjectKind {
+  TABLE
+  COUNTER
+  PASS
+  KITCHEN
+  ENTRANCE
+  BAR
+  WALL
+  PLANT
+}
+
+enum FloorShape {
+  RECT
+  ROUND
+}
+
+/// Furniture and fixtures on the shop floor. Positions are the object's centre
+/// in metres from the middle of the floor (x to the right, z towards the front);
+/// rotation in degrees. Nothing references these rows, so the layout can be
+/// replaced freely.
+model FloorObject {
+  id          String          @id @default(cuid())
+  kind        FloorObjectKind
+  label       String
+  /// TABLE only. Normalised table number (e.g. "5" for "T05"), matched against orders.table_number.
+  tableNumber String?         @unique @map("table_number")
+  /// TABLE only.
+  seats       Int?
+  shape       FloorShape      @default(RECT)
+  x           Float
+  z           Float
+  width       Float
+  depth       Float
+  rotation    Float           @default(0)
+  sortOrder   Int             @default(0) @map("sort_order")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  @@map("floor_objects")
 }

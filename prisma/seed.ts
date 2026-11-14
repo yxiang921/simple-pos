@@ -13,8 +13,10 @@ import { Prisma } from "../lib/generated/prisma/client";
 import { prisma } from "../lib/db";
 import { hashPassword } from "../lib/auth/password";
 import { cancelOrder, createOrder, updateOrderStatus, setPaymentStatus } from "../lib/services/orders";
+import { createSampleLayout } from "../lib/services/floor";
 import { costPerBaseUnit } from "../lib/units";
 import { DEMO_COSTS, DEMO_HOURS, DEMO_MENU } from "../scripts/demo-catalog";
+import { requireCurrentClient } from "../scripts/lib/client-check";
 
 const D = (v: string | number) => new Prisma.Decimal(v);
 
@@ -243,6 +245,7 @@ const MENU: { name: string; category: string; price: string; description: string
 ];
 
 async function main() {
+  requireCurrentClient();
   // Store settings + admin account
   await prisma.storeSetting.upsert({
     where: { id: 1 },
@@ -322,6 +325,11 @@ async function main() {
     items.set(m.name, row.id);
   }
   console.log(`✓ ${CATEGORIES.length} categories, ${MENU.length} menu items with recipes`);
+
+  if ((await prisma.floorObject.count()) === 0) {
+    const floor = await createSampleLayout();
+    console.log(`✓ Sample floor plan (${floor.objects} objects, tables 1–12)`);
+  }
 
   // Sample orders through the real service (deducts stock, writes movements).
   const place = (customerName: string, tableNumber: string | undefined, lines: [string, number][]) =>

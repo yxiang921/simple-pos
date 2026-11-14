@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FLOOR_KINDS, normalizeTableNumber } from "./floor";
 
 // Decimal strings are validated by regex and kept as strings so they can be
 // converted to Prisma.Decimal without passing through floating point.
@@ -69,6 +70,12 @@ export const storeSettingsSchema = z.object({
     .optional()
     .transform((v) => v || "Asia/Kuala_Lumpur")
     .refine(isValidTimeZone, "Unknown time zone, e.g. Asia/Kuala_Lumpur"),
+  orderAlertMinutes: z.coerce
+    .number()
+    .int("Whole minutes only")
+    .min(1, "At least 1 minute")
+    .max(240, "At most 240 minutes")
+    .default(20),
 });
 
 // ─── Categories ────────────────────────────────────────────────────────
@@ -223,6 +230,59 @@ export const expenseChangeSchema = z.object({
   amount: moneyString.refine((v) => Number(v) > 0, "Amount must be more than 0"),
   effectiveFrom: isoDate,
 });
+
+// ─── Floor plan ────────────────────────────────────────────────────────
+
+const metres = (min: number, max: number) => z.number().finite().min(min).max(max);
+
+export const floorObjectSchema = z
+  .object({
+    id: z.string().max(64).optional(),
+    kind: z.enum(FLOOR_KINDS),
+    label: trimmed(40).min(1, "Label is required"),
+    tableNumber: z
+      .string()
+      .trim()
+      .max(10)
+      .nullish()
+      .transform((v) => v || null)
+      .refine((v) => v === null || /^[A-Za-z0-9 -]+$/.test(v), "Use letters, numbers or dashes"),
+    seats: z.number().int().min(1).max(30).nullish(),
+    shape: z.enum(["RECT", "ROUND"]).default("RECT"),
+    x: metres(-60, 60),
+    z: metres(-60, 60),
+    width: metres(0.1, 30),
+    depth: metres(0.05, 30),
+    rotation: metres(-360, 360),
+  })
+  .superRefine((o, ctx) => {
+    if (o.kind !== "TABLE") return;
+    if (!normalizeTableNumber(o.tableNumber)) ctx.addIssue({ code: "custom", path: ["tableNumber"], message: `${o.label}: table number is required` });
+    if (!o.seats) ctx.addIssue({ code: "custom", path: ["seats"], message: `${o.label}: number of seats is required` });
+  });
+
+export const floorLayoutSchema = z
+  .object({
+    floorWidth: metres(3, 100),
+    floorDepth: metres(3, 100),
+    objects: z.array(floorObjectSchema).max(300, "Too many objects"),
+  })
+  .superRefine((v, ctx) => {
+    const seen = new Map<string, string>();
+    v.objects.forEach((o, i) => {
+      if (o.kind === "TABLE") {
+        const k = normalizeTableNumber(o.tableNumber);
+        if (k && seen.has(k)) {
+          ctx.addIssue({ code: "custom", path: ["objects", i, "tableNumber"], message: `Table number ${o.tableNumber} is used twice (${seen.get(k)} and ${o.label})` });
+        } else if (k) seen.set(k, o.label);
+      }
+      if (Math.abs(o.x) > v.floorWidth / 2 + 0.01 || Math.abs(o.z) > v.floorDepth / 2 + 0.01) {
+        ctx.addIssue({ code: "custom", path: ["objects", i], message: `${o.label} is outside the floor` });
+      }
+    });
+  });
+
+export type FloorLayoutInput = z.output<typeof floorLayoutSchema>;
 
 // ─── Orders ────────────────────────────────────────────────────────────
 

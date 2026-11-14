@@ -7,7 +7,7 @@ export const D = (v: string | number) => new Prisma.Decimal(v);
 
 export async function resetDb() {
   const tables = [
-    "expenses", "sold_out_events", "daily_prep",
+    "floor_objects", "expenses", "sold_out_events", "daily_prep",
     "inventory_movements", "order_ingredients", "order_items", "orders",
     "menu_item_ingredients", "menu_items", "categories", "ingredients",
     "admin_sessions", "admin_users", "store_settings",

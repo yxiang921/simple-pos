@@ -10,13 +10,15 @@
     "typecheck": "tsc --noEmit",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
+    "db:deploy": "prisma migrate deploy && prisma generate",
     "db:seed": "prisma db seed",
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
     "test": "vitest run",
     "admin:password": "tsx scripts/set-admin-password.ts",
-    "demo:history": "tsx scripts/simulate-history.ts"
+    "demo:history": "tsx scripts/simulate-history.ts",
+    "db:check": "tsx scripts/check-data.ts",
+    "db:fill": "tsx scripts/check-data.ts --fill"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
@@ -29,6 +31,7 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "server-only": "^0.0.1",
+    "three": "^0.187.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -37,6 +40,7 @@
     "@types/pg": "^8.15.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/three": "^0.187.0",
     "dotenv": "^16.4.5",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",

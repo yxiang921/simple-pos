@@ -35,8 +35,9 @@ export async function createExpense(input: ExpenseInput) {
   return prisma.expense.create({ data: toData(input) });
 }
 
+/** Saving an entry in the app confirms it, so it no longer counts as dummy/simulated data. */
 export async function updateExpense(id: string, input: ExpenseInput) {
-  return prisma.expense.update({ where: { id }, data: toData(input) });
+  return prisma.expense.update({ where: { id }, data: { ...toData(input), isSimulated: false } });
 }
 
 export async function deleteExpense(id: string) {

@@ -5,7 +5,6 @@ import { lowStockIngredients } from "@/lib/services/inventory";
 import { startOfTodayMYT } from "@/lib/time";
 import { formatOrderNumber, formatQty, formatRM, formatTime, type BaseUnitCode } from "@/lib/format";
 import { Badge, EmptyState, PageHeader, Panel, PanelHeader, Table, TD, TH, THead, TR } from "@/components/ui/misc";
-import { AutoRefresh } from "@/components/auto-refresh";
 import { OrderStatusBadge } from "../orders/status-badge";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -51,7 +50,6 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <AutoRefresh seconds={30} />
       <PageHeader title="Dashboard" description="Today's activity and stock at a glance." />
 
       <div className="mb-5 grid grid-cols-2 border-l border-t border-line bg-surface lg:grid-cols-4">

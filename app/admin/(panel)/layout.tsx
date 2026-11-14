@@ -2,6 +2,7 @@ import { ExternalLink } from "lucide-react";
 import { requireAdmin } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
 import { ToastProvider } from "@/components/ui/toast";
+import { LiveIndicator, LiveUpdates } from "@/components/live-updates";
 import { SidebarNav, MobileNav } from "./sidebar-nav";
 import { logoutAction } from "../_actions/auth";
 
@@ -18,6 +19,8 @@ export default async function PanelLayout({ children }: LayoutProps<"/admin">) {
 
   return (
     <ToastProvider>
+      {/* Pushes database changes to every admin page (falls back to polling). */}
+      <LiveUpdates url="/admin/events">
       <div className="flex min-h-dvh">
         <aside className="fixed inset-y-0 left-0 z-30 hidden w-[216px] flex-col border-r border-line bg-surface md:flex">
           <div className="flex h-12 items-center gap-2 border-b border-line px-4">
@@ -59,6 +62,8 @@ export default async function PanelLayout({ children }: LayoutProps<"/admin">) {
               <span className={settings?.acceptingOrders === false ? "text-danger" : "text-primary"}>
                 {settings?.acceptingOrders === false ? "Ordering paused" : "Accepting orders"}
               </span>
+              <span className="hidden md:inline">·</span>
+              <LiveIndicator />
             </div>
             <div className="flex items-center gap-1">
               <a
@@ -80,6 +85,7 @@ export default async function PanelLayout({ children }: LayoutProps<"/admin">) {
           <main className="flex-1 px-4 py-5 md:px-6">{children}</main>
         </div>
       </div>
+      </LiveUpdates>
     </ToastProvider>
   );
 }

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { prisma } from "@/lib/db";
 import { CartButton } from "./cart-button";
+import { GuestLiveUpdates } from "@/components/live-updates";
 
 export const metadata: Metadata = { title: "Order" };
 
@@ -13,6 +14,7 @@ export default async function OrderLayout({ children }: LayoutProps<"/order">) {
 
   return (
     <div className="min-h-dvh bg-surface sm:bg-bg">
+      <GuestLiveUpdates />
       <header className="sticky top-0 z-30 border-b border-line bg-surface">
         <div className="mx-auto flex h-14 max-w-3xl items-center justify-between px-4">
           <Link href="/order" className="flex items-center gap-2.5">

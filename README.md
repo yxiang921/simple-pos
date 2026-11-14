@@ -37,6 +37,7 @@ npm run dev                 # http://localhost:3000
 | `DIRECT_URL` | Used by the Prisma CLI for migrations/seed. On Supabase use the **Session pooler** or direct connection (port `5432`). |
 | `DATABASE_SCHEMA` | Schema that holds the POS tables (default `public`). Set e.g. `pos` to share a database with another app — migrations create the schema automatically and never touch `public`. Don't change it after deploying unless you migrate again. |
 | `DATABASE_POOL_MAX` | Max connections per app instance (default 5). |
+| `REALTIME_DATABASE_URL` | Optional. Connection used to LISTEN for live updates; defaults to `DIRECT_URL`. Must be a session/direct connection (port 5432), not the transaction pooler. |
 | `SESSION_SECRET` | ≥ 32 random chars. Session tokens are stored only as an HMAC with this secret. Generate: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` |
 | `SESSION_TTL_HOURS` | Admin session lifetime (default 12). |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | Initial admin created by `npm run db:seed` (only if that email doesn't exist yet). Change the password afterwards in **Settings**. |
@@ -60,6 +61,8 @@ No secret is exposed to the browser — there are no `NEXT_PUBLIC_*` variables.
 | `npm run db:reset` | **Drops all data**, re-applies migrations and seeds |
 | `npm test` | Integration tests (needs `TEST_DATABASE_URL`) |
 | `npm run admin:password` | Create the admin, or reset its password, from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` |
+| `npm run db:check` | Read-only data check of the POS schema: migrations, menu, recipes, costs, history, prep, running costs — shows what is empty |
+| `npm run db:fill` | Check → fill everything still empty with **dummy** data (never overwrites) → check again. Writes `reports/db-fill-*.json`; undo with `npm run db:fill -- --undo=latest` |
 | `npm run demo:history` | Generate 5 weeks of **simulated** order / prep / sold-out history (flagged `is_simulated`, stock untouched). `-- --reset`, `-- --remove`, `-- --days=56` |
 
 ---
@@ -131,6 +134,24 @@ Each ingredient has a base unit — **pcs**, **g** or **ml** — and all stock m
 - Foreign keys use `RESTRICT` on all historical data.
 
 ---
+
+## Live floor view (`/admin/floor`)
+
+A 3D model of the shop floor (three.js): tables with chairs, counter, drinks bar, kitchen, pickup point, entrance, walls and plants.
+
+- **Colours**: a table is **green** when it has no open order. With an open order (Pending / Preparing / Ready) it turns **yellow**, then gradually **red** as its oldest order waits; at the alert time (Settings → *Order alert*, default 20 min) it is fully red and pulses — the kitchen may have missed it. Orders without a table number colour the pickup point.
+- **Interaction**: drag to rotate, scroll / pinch to zoom, right-drag to pan, toolbar for zoom, reset and top view. Click a table for a tooltip with its orders, waiting time and a one-click next step (Start → Ready → Complete). The side panel lists waiting tables (oldest first), takeaway orders and table numbers that aren't on the plan.
+- **Layout editor** (*Edit layout*): drag objects (0.1 m snap), `R` rotates, `Del` deletes, arrows nudge; add tables (2 / 4 / round / 6 seats) and fixtures; set table number, seats, shape, size and floor size. Table numbers are matched loosely, so `T05`, `Table 5` and `5` are the same table. New stores can start from the sample café layout (also added by `db:seed` / `db:fill`).
+- Data: `floor_objects` (positions in metres, rotation in degrees) and `store_settings.floor_width / floor_depth / order_alert_minutes`.
+
+## Real-time updates
+
+Every admin page (dashboard, orders, floor, prep, inventory, movements, costs) and the guest pages update by themselves within about a second of a change — including changes from another device, the kitchen, or scripts.
+
+- Database triggers send a Postgres `NOTIFY` on the `pos_changes` channel for every write to orders, stock, menu, prep, sold-out events, costs, floor plan and settings (one per statement; migration `20261115010000_realtime_notify`).
+- Each server process keeps **one** `LISTEN` connection (`lib/realtime.ts`) and streams changes to browsers over Server-Sent Events: `/admin/events` (signed-in admins) and `/order/events` (guests — only "menu changed" and their own order's status; no order data).
+- The header shows **● Live** when this works. If the database connection can't `LISTEN` (e.g. `DIRECT_URL` points at the transaction pooler on port 6543), it shows **Every 15 s** and pages fall back to polling. A self-test notification confirms delivery when connecting and every minute.
+- On serverless hosts the event stream reconnects automatically when a function times out; a long-running `npm start` server is the best fit.
 
 ## Demand planning (BossBuddy)
 

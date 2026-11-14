@@ -13,4 +13,5 @@ if (url === process.env.DATABASE_URL || url === process.env.DIRECT_URL) {
   throw new Error("TEST_DATABASE_URL must point to a different database than DATABASE_URL / DIRECT_URL.");
 }
 process.env.DATABASE_URL = url;
+process.env.REALTIME_DATABASE_URL = url;
 process.env.DATABASE_POOL_MAX = "20";

@@ -10,8 +10,10 @@ import "dotenv/config";
 import { prisma } from "../lib/db";
 import { dbSchema } from "../lib/db-schema";
 import { hashPassword, verifyPassword } from "../lib/auth/password";
+import { requireCurrentClient } from "./lib/client-check";
 
 async function main() {
+  requireCurrentClient();
   const email = (process.env.SEED_ADMIN_EMAIL ?? "").trim().toLowerCase();
   const password = process.env.SEED_ADMIN_PASSWORD ?? "";
   if (!email || !password) throw new Error("Set SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD in .env first.");

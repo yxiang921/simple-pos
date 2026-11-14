@@ -22,6 +22,7 @@ export default async function SettingsPage() {
             openTime={settings?.openTime ?? ""}
             closeTime={settings?.closeTime ?? ""}
             timezone={settings?.timezone ?? "Asia/Kuala_Lumpur"}
+            orderAlertMinutes={settings?.orderAlertMinutes ?? 20}
           />
         </Panel>
         <Panel>
