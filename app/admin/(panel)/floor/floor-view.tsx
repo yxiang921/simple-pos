@@ -16,6 +16,7 @@ import {
   formatAge,
   heatColor,
   KIND_LABEL,
+  normalizeTableNumber,
   type FloorObjectData,
   type FloorOrder,
   type ObjectStatus,
@@ -48,7 +49,7 @@ const NEXT_STEP: Record<FloorOrder["status"], { status: "PREPARING" | "READY" | 
   READY: { status: "COMPLETED", label: "Complete" },
 };
 
-export function FloorView({ data }: { data: FloorData }) {
+export function FloorView({ data, focusTable = null }: { data: FloorData; focusTable?: string | null }) {
   const router = useRouter();
   const toast = useToast();
   const apiRef = useRef<SceneApi | null>(null);
@@ -57,7 +58,11 @@ export function FloorView({ data }: { data: FloorData }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState<{ basedOn: FloorData; draft: Draft } | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Opened from an order's table link: start with that table selected (the scene flies to it).
+  const [initialFocusId] = useState(
+    () => data.objects.find((o) => o.kind === "TABLE" && normalizeTableNumber(o.tableNumber) === focusTable)?.id ?? null,
+  );
+  const [selectedId, setSelectedId] = useState<string | null>(initialFocusId);
   const [glError, setGlError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.parse(data.serverNow));
@@ -212,6 +217,7 @@ export function FloorView({ data }: { data: FloorData }) {
               onError={onError}
               tooltipRef={tooltipRef}
               apiRef={apiRef}
+              initialFocusId={initialFocusId}
             />
           )}
 
@@ -413,9 +419,9 @@ function LivePanel({
           <ul className="mt-1 space-y-1">
             {status.unknown.map((u) => (
               <li key={u.tableNumber} className="flex items-center justify-between gap-2 text-[13px]">
-                <span>
+                <Link href={`/admin/orders?status=ACTIVE&table=${encodeURIComponent(u.tableNumber)}`} className="hover:text-primary hover:underline">
                   Table {u.tableNumber} · {u.orders.length} order{u.orders.length === 1 ? "" : "s"}
-                </span>
+                </Link>
                 <span className="tabular text-muted">{formatAge(u.oldestMs)}</span>
               </li>
             ))}
@@ -531,6 +537,16 @@ function ObjectTooltip({
                 })}
               </ul>
             )}
+          </div>
+        )}
+        {(isTable || isPass) && (
+          <div className="flex justify-end border-t border-line px-3.5 py-2">
+            <Link
+              href={isTable ? `/admin/orders?table=${encodeURIComponent(object.tableNumber ?? "")}` : "/admin/orders?status=ACTIVE&table=none"}
+              className="text-[12px] font-medium text-primary hover:underline"
+            >
+              {isTable ? "All orders for this table →" : "All takeaway orders →"}
+            </Link>
           </div>
         )}
       </div>

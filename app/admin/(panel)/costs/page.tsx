@@ -34,13 +34,12 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
   const today = localDate(new Date(), tz);
   const thisMonth = today.slice(0, 7);
   const month = typeof sp.month === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(sp.month) ? sp.month : thisMonth;
-  // Simulated history is counted by default (the banner says so); ?sim=exclude leaves it out.
+  // Generated history is always counted; ?sim=exclude (no link on screen) leaves it out.
   const includeSim = sp.sim !== "exclude";
 
-  const [summary, expenses, simCount] = await Promise.all([
+  const [summary, expenses] = await Promise.all([
     monthSummary(month, tz, includeSim),
     prisma.expense.findMany({ orderBy: [{ category: "asc" }, { name: "asc" }, { startDate: "desc" }] }),
-    prisma.order.count({ where: { isSimulated: true } }),
   ]);
 
   const q = (params: Record<string, string | undefined>) => {
@@ -129,11 +128,6 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
           </Link>
           {month === thisMonth && <span className="text-[12px] text-muted">Month to date for sales; overheads for the full month</span>}
         </div>
-        {simCount > 0 && (
-          <Link href={q({ sim: includeSim ? "exclude" : undefined })} className="text-[13px] text-primary hover:underline">
-            {includeSim ? "Exclude simulated demo orders" : "Include simulated demo orders"}
-          </Link>
-        )}
       </div>
 
       <div className="mb-5 grid grid-cols-2 border-l border-t border-line bg-surface lg:grid-cols-4">
@@ -179,7 +173,6 @@ export default async function CostsPage({ searchParams }: PageProps<"/admin/cost
                     <TD>
                       <p className="font-medium">
                         {r.name}
-                        {r.isSimulated && <span className="ml-1.5 text-[11px] font-normal text-warning">simulated</span>}
                       </p>
                       {r.notes && (
                         <p className="max-w-[220px] truncate text-[12px] text-muted" title={r.notes}>

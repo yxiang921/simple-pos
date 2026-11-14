@@ -25,6 +25,8 @@ type Props = {
   onError: (message: string) => void;
   tooltipRef: RefObject<HTMLDivElement | null>;
   apiRef: RefObject<SceneApi | null>;
+  /** Fly the camera to this object once the layout has loaded. */
+  initialFocusId?: string | null;
 };
 
 /** React wrapper around the imperative three.js engine (loaded client-side only). */
@@ -64,6 +66,13 @@ export default function FloorScene(props: Props) {
   useEffect(() => engineRef.current?.setOrders(orders, alertMinutes, serverNow), [orders, alertMinutes, serverNow]);
   useEffect(() => engineRef.current?.setMode(mode), [mode]);
   useEffect(() => engineRef.current?.setSelected(selectedId), [selectedId]);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (focused.current || !props.initialFocusId || !engineRef.current) return;
+    if (!objects.some((o) => o.id === props.initialFocusId)) return;
+    focused.current = true;
+    engineRef.current.focus(props.initialFocusId);
+  }, [objects, props.initialFocusId]);
 
   useImperativeHandle(
     props.apiRef,

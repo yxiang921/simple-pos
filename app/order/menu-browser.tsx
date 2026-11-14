@@ -22,6 +22,18 @@ export function MenuBrowser({ menu, acceptingOrders }: { menu: GuestMenu; accept
     return m;
   }, [menu.items]);
 
+  // QR codes can point at the menu (/order?table=5): remember the table for checkout.
+  useEffect(() => {
+    const table = new URLSearchParams(window.location.search).get("table");
+    if (!table) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem("pos.guest.v1") ?? "{}");
+      localStorage.setItem("pos.guest.v1", JSON.stringify({ ...saved, table }));
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
+
   // Highlight the category currently in view.
   useEffect(() => {
     const obs = new IntersectionObserver(

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Ban, Eye, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -118,9 +119,19 @@ function OrderViewDialog({ order, open, onClose }: { order: OrderDetail; open: b
       description={`${order.customerName}${order.tableNumber ? ` · Table ${order.tableNumber}` : ""} · ${formatDateTime(order.createdAt)}`}
     >
       <div className="space-y-5 text-left text-[13px]">
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <OrderStatusBadge status={order.status} />
           {order.paymentStatus === "PAID" ? <Badge tone="green">Paid</Badge> : <Badge tone="outline">Unpaid</Badge>}
+          {order.floorTable && (
+            <span className="ml-auto flex gap-3">
+              <Link href={`/admin/floor?table=${encodeURIComponent(order.floorTable)}`} className="text-primary hover:underline">
+                Show table on floor
+              </Link>
+              <Link href={`/admin/orders?table=${encodeURIComponent(order.floorTable)}`} className="text-primary hover:underline">
+                All orders for this table
+              </Link>
+            </span>
+          )}
         </div>
         {order.cancelReason && (
           <p className="rounded-[4px] border border-line bg-[#fafaf8] px-3 py-2">

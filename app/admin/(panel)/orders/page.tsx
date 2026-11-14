@@ -33,7 +33,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
   const from = isoDay(sp.from);
   const to = isoDay(sp.to);
   const { page: requestedPage, size } = readPaging(sp);
-  // Simulated history is shown (with a badge) unless hidden.
+  // Generated history (is_simulated) is listed like any other order; ?sim=hide leaves it out.
   const hideSim = sp.sim === "hide";
   // ?table=5 → orders for that table (any spelling, e.g. "T05"); ?table=none → takeaway / no table.
   const table = typeof sp.table === "string" ? sp.table.trim().slice(0, 20) : "";
@@ -233,10 +233,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ord
                     </TD>
                     <TD className="tabular whitespace-nowrap text-right">{formatRM(o.totalAmount.toString())}</TD>
                     <TD>
-                      <span className="flex items-center gap-1">
-                        <OrderStatusBadge status={o.status} />
-                        {o.isSimulated && <Badge tone="outline">Simulated</Badge>}
-                      </span>
+                      <OrderStatusBadge status={o.status} />
                     </TD>
                     <TD>
                       {o.paymentStatus === "PAID" ? <Badge tone="green">Paid</Badge> : <Badge tone="outline">Unpaid</Badge>}

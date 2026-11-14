@@ -6,8 +6,10 @@ import { useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import { clsx } from "clsx";
 import { ChevronLeft, Loader2, Trash2 } from "lucide-react";
 import type { GuestMenuItem } from "@/lib/services/menu";
+import type { TableOption } from "@/lib/services/floor";
+import { normalizeTableNumber } from "@/lib/floor";
 import { centsToString, formatRM, toCents } from "@/lib/format";
-import { Field, Input } from "@/components/ui/form";
+import { Field, Input, Select } from "@/components/ui/form";
 import { cart, cartSignature, MAX_PER_ITEM, useCart } from "../cart-store";
 import { ItemImage, Stepper } from "../menu-browser";
 import { submitOrderAction } from "../actions";
@@ -31,7 +33,16 @@ function getCheckoutKey(signature: string): string {
   }
 }
 
-export function CartView({ items, acceptingOrders }: { items: GuestMenuItem[]; acceptingOrders: boolean }) {
+export function CartView({
+  items,
+  acceptingOrders,
+  tables = [],
+}: {
+  items: GuestMenuItem[];
+  acceptingOrders: boolean;
+  /** Tables on the floor plan; when present, guests pick from these. */
+  tables?: TableOption[];
+}) {
   const router = useRouter();
   const lines = useCart();
   const live = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
@@ -190,7 +201,7 @@ export function CartView({ items, acceptingOrders }: { items: GuestMenuItem[]; a
 
         <section className="mt-3 border-y border-line bg-surface px-4 py-4 sm:rounded-[6px] sm:border">
           <h2 className="mb-3 text-[14px] font-semibold">Your details</h2>
-          {hydrated && <GuestDetails fieldErrors={fieldErrors} />}
+          {hydrated && <GuestDetails fieldErrors={fieldErrors} tables={tables} />}
         </section>
 
         {error && (
@@ -224,7 +235,7 @@ function noopSubscribe() {
 }
 
 /** Uncontrolled inputs, prefilled from the last order and from ?table= (QR codes). Client-only. */
-function GuestDetails({ fieldErrors }: { fieldErrors: Record<string, string[] | undefined> }) {
+function GuestDetails({ fieldErrors, tables }: { fieldErrors: Record<string, string[] | undefined>; tables: TableOption[] }) {
   const [defaults] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(NAME_STORAGE) ?? "{}") as { name?: string; table?: string };
@@ -248,16 +259,35 @@ function GuestDetails({ fieldErrors }: { fieldErrors: Record<string, string[] | 
           aria-invalid={!!fieldErrors.customerName}
         />
       </Field>
-      <Field label="Table no. (optional)" htmlFor="tableNumber" error={fieldErrors.tableNumber}>
-        <Input
-          id="tableNumber"
-          name="tableNumber"
-          defaultValue={defaults.table}
-          maxLength={10}
-          placeholder="e.g. 12"
-          className="h-11 text-[16px]"
-          aria-invalid={!!fieldErrors.tableNumber}
-        />
+      <Field label="Table" htmlFor="tableNumber" error={fieldErrors.tableNumber}>
+        {tables.length > 0 ? (
+          // The shop has a floor plan: only its tables can be chosen, so every order lands on a real table.
+          <Select
+            id="tableNumber"
+            name="tableNumber"
+            defaultValue={tables.find((t) => t.tableNumber === normalizeTableNumber(defaults.table))?.tableNumber ?? ""}
+            className="h-11 text-[16px]"
+            aria-invalid={!!fieldErrors.tableNumber}
+          >
+            <option value="">No table — takeaway / counter</option>
+            {tables.map((t) => (
+              <option key={t.tableNumber} value={t.tableNumber}>
+                {t.label}
+                {t.seats ? ` (${t.seats} seats)` : ""}
+              </option>
+            ))}
+          </Select>
+        ) : (
+          <Input
+            id="tableNumber"
+            name="tableNumber"
+            defaultValue={defaults.table}
+            maxLength={10}
+            placeholder="Optional, e.g. 12"
+            className="h-11 text-[16px]"
+            aria-invalid={!!fieldErrors.tableNumber}
+          />
+        )}
       </Field>
     </div>
   );

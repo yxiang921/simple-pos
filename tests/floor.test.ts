@@ -157,3 +157,36 @@ describe("floor services", () => {
     expect(data.alertMinutes).toBe(20);
   });
 });
+
+describe("orders ↔ floor plan", () => {
+  it("with a floor plan, accepts only its tables and stores the standard table number", async () => {
+    const s = await seedBurgerScenario();
+    await createSampleLayout(); // tables 1–12
+    const ok = await createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "T05" });
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: ok.id } })).tableNumber).toBe("5");
+
+    await expect(createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "99" })).rejects.toThrow(
+      /isn't one of our tables/,
+    );
+    // takeaway (no table) is always fine
+    await createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: null });
+    expect(await prisma.order.count()).toBe(2);
+  });
+
+  it("without a floor plan, any table number is accepted as typed", async () => {
+    const s = await seedBurgerScenario();
+    const o = await createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "T99" });
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: o.id } })).tableNumber).toBe("T99");
+  });
+
+  it("lists tables in natural order and finds every spelling of a table on orders", async () => {
+    const { listTables, tableNumberVariants } = await import("@/lib/services/floor");
+    const s = await seedBurgerScenario();
+    await createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "T05" });
+    await createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "05" });
+    await createOrder({ ...orderInput([{ menuItemId: s.burger.id, quantity: 1 }]), tableNumber: "6" });
+    expect((await tableNumberVariants("5")).sort()).toEqual(["05", "T05"]);
+    await createSampleLayout();
+    expect((await listTables()).map((t) => t.tableNumber)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]);
+  });
+});

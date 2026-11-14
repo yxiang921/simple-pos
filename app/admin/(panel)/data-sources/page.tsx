@@ -22,7 +22,7 @@ export default async function DataSourcesPage() {
     <>
       <PageHeader
         title="Data sources"
-        description="The order history in this POS is simulated. Its patterns — not its volumes — come from the public datasets below."
+        description="The patterns in the order history — weekdays, seasons, time of day, daily ups and downs — come from the public datasets below."
       />
       {!p ? (
         <Panel>
@@ -32,8 +32,8 @@ export default async function DataSourcesPage() {
         <div className="grid max-w-6xl gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
           <div className="space-y-5">
             <Panel>
-              <PanelHeader title="Attribution (copy onto screens and slides)" />
-              <p className="select-all px-4 py-3 text-[13px] leading-relaxed">{p.attribution}</p>
+              <PanelHeader title="Attribution (CC BY 4.0 — copy onto slides)" />
+              <p className="select-all px-4 py-3 text-[13px] leading-relaxed">{p.attribution.replace(/^Simulated shop\.\s*/, "")}</p>
             </Panel>
 
             <Panel>
@@ -113,7 +113,7 @@ export default async function DataSourcesPage() {
           </div>
 
           <Panel className="h-fit">
-            <PanelHeader title="Simulated data in this database" />
+            <PanelHeader title="Generated history in this database" />
             <dl className="divide-y divide-line text-[13px]">
               {[
                 ["Orders", orders],
@@ -129,7 +129,7 @@ export default async function DataSourcesPage() {
             </dl>
             <div className="space-y-1.5 border-t border-line px-4 py-3 text-[12px] text-muted">
               {oldest && <p>History starts {oldest.createdAt.toISOString().slice(0, 10)}.</p>}
-              <p>Every simulated row has is_simulated = true. Real orders, prep entries and stock are never changed by the simulator.</p>
+              <p>Generated rows are flagged in the database so they can be told apart from real orders. Real orders, prep entries and stock are never changed by the generator.</p>
               <p>
                 Regenerate: <code className="text-ink">npm run demo:history -- --reset</code>. Patterns built {p.generatedAt.slice(0, 10)}.
               </p>
